@@ -1,0 +1,846 @@
+<!DOCTYPE HTML>
+<html>
+    <head>
+    	<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+        <title>CE-deklaration</title>
+        <!--link href="../css/book.css" rel="stylesheet" type="text/css">
+		<script src="../js/paged.polyfill.js"></script-->
+        <style type="text/css">
+        	:root {
+        		--pagedjs-width: 297mm;
+            	--pagedjs-height: 210mm;
+            	--pagedjs-pagebox-width: 297mm;
+            	--pagedjs-pagebox-height: 210mm;
+				--pagedjs-margin-top: 5mm;
+				--pagedjs-margin-right: 5mm;
+				--pagedjs-margin-bottom: 5mm;
+				--pagedjs-margin-left: 5mm;
+        	}
+            body {
+                font-family: serif;
+                font-size: 10pt;
+                background: #fff;
+                line-height:13px;
+            }
+            @page {
+            	size: A4 landscape;
+            	margin: 5mm;
+			}
+			@page :blank {
+				display: none;
+			}
+			section {
+				margin-top: -80px !important;
+				/* margin-left: -80px !important;
+				margin-right: -80px !important; */
+				margin-bottom: -80px !important;
+			}
+            .document-container {
+                width: 297mm;
+                height: 190mm;
+                margin: 25mm auto -5mm;
+                page-break-after: always;
+            }
+            .main-table {
+                width: fit-content;
+                max-width: 280mm;
+                height: 180mm;
+                min-height: 180mm;
+                page-break-inside: avoid;
+            }
+			.main-table * {
+				font-family: serif !important;
+				font-size: 10pt;
+				line-height: 1.2;
+			}
+            .standard-column-1 {
+                position: relative;
+                min-width: 40mm;
+                max-width: 40mm;
+                width: 40mm;
+                padding: 1mm 2mm;
+                vertical-align: top;
+                text-align: left;
+            }
+            .standard-column-1 .lang-code {
+                display: block;
+                line-height: 1;
+                font-size: 140%;
+                font-weight: bold;
+                width: 100%;
+                text-align: center;
+                position: absolute;
+                top: 0px;
+            }
+            .standard-column-1 .column-header-title {
+                font-weight: bold;
+                display: block;
+                width: 100%;
+                text-align: center;
+                position: relative;
+                top: 20px;
+            }
+            .top-header-column {
+                padding-bottom: 32px;
+            }
+            .standard-column-2 {
+                min-width: 40mm;
+                max-width: 40mm;
+                width: 40mm;
+                padding: 1mm 2mm;
+                vertical-align: top;
+                text-align: left;
+            }
+            img.ce-image {
+                width: 40px;
+                position: relative;
+                padding: 10px 10px 10px 10px;
+            }
+			img.ce-image {
+				width: 60px !important;
+			}
+            .first-row-top-border {
+                border-top: 1px solid #000;
+            }
+            .grey-bg {
+                box-shadow: #eaeaea 0 2000px 0 inset;
+            }
+            .bold-text {
+                font-weight: bold;
+            }
+            .white-border-bottom {
+                border-bottom: 2px solid white;
+            }
+            .signature-image {
+                position: absolute;
+                top: 0;
+                right: 0;
+                width: 50px;
+            }
+            .signature-image-dynapac {
+                width: 80px;
+                top: -3px;
+                right: 0;
+            }
+            .signature-image-dynapac-firstpage {
+                right: -10px;
+            }
+            .nowrap {
+                white-space: nowrap;
+            }
+            .third-page-spacing {
+                margin-top: 14px!important;
+            }
+            .page-break {
+				page-break-before: always;
+			}
+        </style>
+        <style type="text/css" media="print">
+            html, body {
+                /* transform: scale(0.9); */
+            }
+            #page-break {
+                page-break-before: always;
+                padding-top: 30px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="document-container">
+            <table cellspacing="0" cellpadding="0" class="main-table">
+                <tr>
+                    <td class="standard-column-1 top-header-column">
+                        <span class="lang-code">SE</span>
+                        <span class="column-header-title">Försäkran om överensstämmelse</span>
+                    </td>
+                    <td class="standard-column-1 top-header-column">
+                        <span class="lang-code">EN</span>
+                        <span class="column-header-title">Declaration of conformity</span>
+                    </td>
+                    <td class="standard-column-1 top-header-column">
+                        <span class="lang-code">DE</span>
+                        <span class="column-header-title">Konformitätserklärung</span>
+                    </td>
+                    <td class="standard-column-1 top-header-column">
+                        <span class="lang-code">FR</span>
+                        <span class="column-header-title">Déclaration de conformité</span>
+                    </td>
+                    <td class="standard-column-1 top-header-column">
+                        <span class="lang-code">FI</span>
+                        <span class="column-header-title">Vaatimustenmukaisuu- vakuutus</span>
+                    </td>
+                    <td class="standard-column-1 top-header-column">
+                        <span class="lang-code">DK</span>
+                        <span class="column-header-title">Overensstemmelse- serklæring</span>
+                    </td>
+                    <td class="standard-column-2 top-header-column">
+                        <img src="{{ce_logo_url}}" class="ce-image" />
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 bold-text first-row-top-border">
+                        Vi
+                    </td>
+                    <td class="standard-column-1 bold-text first-row-top-border">
+                        We
+                    </td>
+                    <td class="standard-column-1 bold-text first-row-top-border">
+                        Wir
+                    </td>
+                    <td class="standard-column-1 bold-text first-row-top-border">
+                        Nous
+                    </td>
+                    <td class="standard-column-1 bold-text first-row-top-border">
+                        Me
+                    </td>
+                    <td class="standard-column-1 bold-text first-row-top-border">
+                        Undertegnede
+                    </td>
+                    <td class="standard-column-2 first-row-top-border">
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg">
+                        Tillverkare:<br />
+                        Adress:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Supplier’s name:<br />
+                        Address:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Nahme des Anbieters:<br />
+                        Anschrift:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Nom du formesseu:<br />
+                        Adresse:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Toimittajan nimi:<br />
+                        Osoite:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Producent:<br />
+                        Adresse:
+                    </td>
+                    <td class="standard-column-2 grey-bg">
+                        {{supplier_block}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 bold-text">
+                        försäkrar under eget ansvar
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        declare under our own responsibility that the product
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        erklären in alleiniger Verantwortung, dass das Produkt
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        déclarons sous notre seuie responsabilité que le produit
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        vakuutamme yksinomaan omalla vastuullamme, että seuraava tuote
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        eterklærer under eget ansvar, at produktet
+                    </td>
+                    <td class="standard-column-2">
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg">
+                        Maskin, märke:<br />
+                        Typ:<br />
+                        Tillverkningsnummer:<br />
+                        Motornr:<br />
+                        Installerad nettoeffekt, motor:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Name:<br />
+                        Type or model:<br />
+                        Serial no:<br />
+                        Engine serial no:<br />
+                        Installed net effect, engine:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Typ oder Mode:<br />
+                        Typ oder Modell:<br />
+                        Seriennummer:<br />
+                        Seriennummer, Motor:<br />
+                        Installierter Nettoeffect, Motor:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Nom:<br />
+                        Type ou modèle:<br />
+                        No de serie:<br />
+                        No de serie, moteur:<br />
+                        Puissance installée nette, moteur:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Nimi:<br />
+                        Tyyppi tai malli:<br />
+                        Sarjanumero:<br />
+                        Sarjanumero, moottori:<br />
+                        Asennettu nettoteho, moottori:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Maskine, maerke:<br />
+                        Type eller model:<br />
+                        Serienummer:<br />
+                        Serienummer, motor:<br />
+                        Installeret nettoeffekt, motor:
+                    </td>
+                    <td class="standard-column-2 grey-bg">
+                        {{maskin_marke}}<br />
+                        <span class='nowrap'>{{modell}}</span><br />
+                        <span class='nowrap'>{{serienummer}}</span><br />
+                        <span class='nowrap'>{{motornummer}}</span><br />
+                        <span class='nowrap'>{{motoreffekt}}</span>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 bold-text">
+                        Som omfattas av denna försäkran är i överensstämmelse med följande standarder eller andra regelgivande dokument
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        To wich this dec- laration relates in conformity with the following standard(s) or other normative document(s)
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        auf das sich diese Erklärung bezieht, mit der(den) Nomen oder normativen Dokument(en) übereinstimmt
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        Auquel se réfère cette déclaration est conforme à la(aux) norme(s) ou autre(s) document(s) normatif(s)
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        johon tämä vakuutus liittyy, on seruaavan standardin (seruaavien standardien) tai muun normatiivisen asiakirjan (muiden normatiivisten asiakirjojen) vaatimusten mukainen
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        som er omfattet av denne erklæring, er i overensstemmelse med følgende standarder eller andre normgivende dokumenter
+                    </td>
+                    <td class="standard-column-2">
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Harmoniserande stand- arder som tillämpas:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Harmonised standard that are used:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Angewendete harmonisierte Standards:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Normes harmoniseés applicables:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Sovellettavat yhdenmukais- tetut:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Harmoniserende standarder som er gældende:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{harmoniserande_standarder}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Enligt villkoren i direktiv:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Following the provisiol of Directive:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Gemäss den Bestimmungen der Richtlinie:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Conformément aux dispositions de la Directive:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Noudattaen direktiivin määräyksiä:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        I henhold til betingelserne i direktiv:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{enligt_villkoren_i_direktiv}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Anmält organ för direktiv 2000/14/EC:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Notified body for direc- tive 2000/14/EC:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Angemeldetes Organ für Direktive 2000/14/EC:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Organisme spécifié pour la direc- tive 2000/14/EC:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Ilmoitettu elin direktiiville 2000/14/EC:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Anmeldt organ for direktiv 2000/14/EC:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{anmalt_organ_for_direktiv}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Uppmätt ljudeffektnivå:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Measured sound-power level:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Gemessener Geräuschpegel:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Niveau de puissance sonore relevé:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Mitattu äänitehotaso:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Målt lydeffektniveau:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{uppmatt_ljudeffektniva}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Garanterad ljud- effektnivå:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Guaranteed sound-pow- er level:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Garantierter Geräuschpegel:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Niveau de puissance sonore garanti:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Taattu äänitehotaso:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Garanteret lydeffektniveau:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{garanterad_ljud_och_effektniva}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Ort och datum:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Place and date:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Ort und Datum:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Lieu et date:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Vaakuutusen antopaikka ja päivämäärä:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Sted og dato:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{supplier_block}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 bold-text">
+                        forsikret på eget ansvarforsikret på eget ansvar
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        oświadczamy na własną odpowiedzialność, że produkt
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        verklaren onder eigen verantwoordelijk- heid dat product:
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        saját felelösség alatt biztosítjuk
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        dichiariamo sotto la nostra unica responsabilità che il prodotto
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        declaramos bajo nuestra propia responsabilidad que el producto
+                    </td>
+                    <td class="standard-column-2">
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg">
+                        Maskin, merke:<br />
+                        Type:<br />
+                        Produksjonsnummer:<br />
+                        Motornummer:<br />
+                        Installert nettoeffekt, motor:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Marka:<br />
+                        Typ lub model:<br />
+                        Numer seryjny:<br />
+                        Numer seryjny silnika:<br />
+                        Moc znamionowa silnika:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Merk:<br />
+                        Type:<br />
+                        Productnummer:<br />
+                        Motornummer:<br />
+                        Netto motorwermogen:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Gép, márka:<br />
+                        Típus:<br />
+                        Gyártásiszám:<br />
+                        Motorszám:<br />
+                        Szerelt nettóhatás, motor:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Nome:<br />
+                        Tipo o modello:<br />
+                        Numero di serie:<br />
+                        Numero di serie del motore:<br />
+                        Potenza netta installato, motore:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Nombre:<br />
+                        Tipo o modelo:<br />
+                        Núm. de serie:<br />
+                        Núm. de serie motor:<br />
+                        Potencia neta instalada,<br />motor:
+                    </td>
+                    <td class="standard-column-2 grey-bg">
+                        {{maskin_marke}}<br />
+                        <span class="nowrap">{{modell}}</span><br />
+                        <span class="nowrap">{{serienummer}}</span><br />
+                        <span class="nowrap">{{motornummer}}</span><br />
+                        <span class="nowrap">{{motoreffekt}}</span>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 bold-text">
+                        det som omfattes av denne forsikring är i overensstemmelse med følgende standarder eller andre reglementer
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        którego dotyczy niniejsza deklaracja odpowiada następującym standardom i/lub normom
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        waaraan deze verklaring aan relateert conform de navolgende standaarden en andere regelgevingen
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        amelyek hozzátartoznak ehhez a megfelelési nyilatko- zathoz és megfelelnek a következö szabványoknak vagy más törvényszerü dokumentumoknak<br />&nbsp;
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        A cui si riferisce questa dichiarazione in conformità con la(e) norma(e) seguente(i) o altro(i) documento(i) normativo(i)
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        Al que se refiere esta declaración es conforme a la(s) siguiente(s) norma(s) u otro(s) documento(s) normativo(s)
+                    </td>
+                    <td class="standard-column-2">
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Andre godkjente standarder:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Stosowane ujednolicone standardy:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Overeenkomstige normen:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Más jóváhagyott szabványok:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Norma armonizzata<br />utilizzata:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Normas armonizadas utilizadas:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{harmoniserande_standarder}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        I samsvar med vilkårene i direktive:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Spełnione wymagania następujących dyrektyw:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Conform de definitie van de richtlijn:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Irányelv feltétele szerint:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Seguendo la disposizione<br />della Direttiva:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                       Conforme a lo dispuesto en<br />la Directiva:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{enligt_villkoren_i_direktiv}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Notified body for direktive 2000/14/EC:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Jednostka notyfikowana dla dyrektywy 200/14/ EC:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Keuringsinstantie voor richtlijn 2000/14EC:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Bejelentett szervezet az irányelvnek:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Ente notificato per la direttiva 2000/14/CE:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Organismo notificado para la directiva 2000/14/CE:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{anmalt_organ_for_direktiv}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Målt lydeffekt nivå:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Zmierzony poziom natężenia dźwięku:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Gemeten geluidsniveau:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Felmért hangerö hatás nivó:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Livello di potenza acustica misurato:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Nivel de potencia sonora medido:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{uppmatt_ljudeffektniva}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Garantert lydeffekt nivå:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        antowany poziom natężenia dźwięku:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Gewaarborgd geluidsniveau:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Garantált hangerö hatás nivó:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Livello di potenza acustica garantito:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Nivel de potencia sonara garantizado:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{garanterad_ljud_och_effektniva}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Ordre dato:<br />&nbsp;
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Miejsce i data wystawienia:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Plaats en datum:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Hely és dátum:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Luogo e data:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Lugar y fecha:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{supplier_block}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 bold-text">
+                        declaramos sob nossa exclusiva<br />responsabilidade que o produto
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        na lastno odgovornost izjavljamo,<br />da je izdelek
+                    </td>
+                    <td class="standard-column-2">
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg">
+                        Nome:<br />
+                        Tipo ou modelo:<br />
+                        N.º de série:<br />
+                        Nº de série do motor:<br />
+                        Potência líquida instalada, motor:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Ime:<br />
+                        Vrsta ali model:<br />
+                        Serijska št.:<br />
+                        Serijska št. motorja:<br />
+                        Nameščena neto moč, motor:
+                    </td>
+                    <td class="standard-column-2 grey-bg">
+                        {{maskin_marke}}<br />
+                        <span class="nowrap">{{modell}}</span><br />
+                        <span class="nowrap">{{serienummer}}</span><br />
+                        <span class="nowrap">{{motornummer}}</span><br />
+                        <span class="nowrap">{{motoreffekt}}</span>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 bold-text">
+                        Em relação à qual esta declaração<br />diz respeito está em conformidade<br />com a(s) seguinte(s) norma(s) ou outro(s) documento(s) normativo(s)
+                    </td>
+                    <td class="standard-column-1 bold-text">
+                        na katerega se nanaša ta izjava, skladen z naslednjimi standardi oziroma drugimi normativnimi dokumenti.
+                    </td>
+                    <td class="standard-column-2">
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Norma harmonizada utilizada:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Usklajeni standardi, ki so uporabljeni:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{harmoniserande_standarder}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        De acordo com o disposto na directiva:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        V skladu z določbami direktive:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{enligt_villkoren_i_direktiv}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Órgão de notificação da directiva 2000/14/CE:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Priglašeni organ za direktivo 2000/14/ES:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{anmalt_organ_for_direktiv}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Nível de potência sonora medida:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Izmerjena stopnja zvočne moči:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{uppmatt_ljudeffektniva}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Nível de potência sonora garantida:
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Zagotovljena stopnja zvočne moči:
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{garanterad_ljud_och_effektniva}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Local e data:<br />&nbsp;
+                    </td>
+                    <td class="standard-column-1 grey-bg white-border-bottom">
+                        Kraj in datum:<br />&nbsp;
+                    </td>
+                    <td class="standard-column-2 grey-bg white-border-bottom">
+                        {{place_and_date}}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="standard-column-1 grey-bg">
+                        Nome e assinatura:
+                    </td>
+                    <td class="standard-column-1 grey-bg">
+                        Ime in podpis:
+                    </td>
+                    <td class="standard-column-2 grey-bg" style="position: relative;">
+                        {{namn_och_underskrift}}
+                        <br /><br /><br />
+                        {{signature_block}}
+                    </td>
+                </tr>
+
+
+
+
+            </table>
+
+        </div>
+        <script type="application/javascript">
+            var isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
+            if (isFirefox) {
+                document.getElementById('document-container').style.transform = "scale(0.87)";
+                document.getElementById('document-container').style.marginLeft = "-75px";
+                document.getElementById('document-container').style.marginTop = "-50px";
+            } else {
+                document.getElementById("page-break").innerHTML = "<br />";
+            }
+
+            var shouldPrintValue = "";
+            setTimeout(function() {
+                if (shouldPrintValue == "1") {
+                    window.print();
+                }
+            }, 2000);
+        </script>
+    </body>
+</html>

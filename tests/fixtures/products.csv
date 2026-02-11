@@ -1,0 +1,4 @@
+type;category_path;artikel_id;name_sv;desc_sv;name_en;desc_en;number;no_units
+produkt;f50\engine;;Engine;Desc;Engine;Desc;1;
+kategori;f50\engine\parts;;Parts;Desc;Parts;Desc;2;
+artikel;f50\engine\parts;SKU123;Part A;Desc;Part A;Desc;10;2

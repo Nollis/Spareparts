@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Motorintyg</title>
+    <style>
+      @page {
+        margin: 0;
+      }
+      body, tr, td {
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 13px;
+      }
+      tr {
+        line-height: 15px;
+      }
+      .grey-gb {
+        background-color: #ddd;
+        font-weight: bold;
+      }
+      .inline-table {
+        border-right: solid 1px #666;
+        border-top: solid 1px #666;
+      }
+      .inline-table td {
+        border-left: solid 1px #666;
+        border-bottom: solid 1px #666;
+      }
+      .document-signature-image {
+        width: 140px;
+        margin-top: -15px;
+        margin-bottom: -15px;
+      }
+      .document-signature-image-dynapac {
+        width: 100px;
+      }
+      .signature-name-text {
+        position: relative;
+        top: -20px;
+      }
+      .swepac-logo {
+        position: relative;
+        width: 180px;
+        top: -12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div style="width: 600px; margin: 0 auto; padding-top: 60px" class="landscape">
+      <table cellspacing="0" cellpadding="0" width="600">
+        <tr>
+          <td style="text-align: right">Dok. nr: 10.2.3</td>
+        </tr>
+        <tr>
+          <td style="padding-top: 15px; padding-bottom: 30px;">{{logo_block}}</td>
+        </tr>
+        <tr>
+          <td>
+            <h2 style="text-align: center">Motor- och milj&ouml;intyg</h2>
+            {{intro_block}}
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <table cellpadding="5" cellspacing="0" width="100%" class="inline-table">
+              <tr>
+                <td class="grey-gb" width="30%">Maskinslag</td>
+                <td colspan="4">{{maskinslag}}</td>
+              </tr>
+              <tr>
+                <td class="grey-gb">Fabrikat, typ</td>
+                <td colspan="4">{{modell}}</td>
+              </tr>
+              <tr>
+                <td class="grey-gb">Serienummer*</td>
+                <td colspan="4">{{serienummer}}</td>
+              </tr>
+              <tr>
+                <td class="grey-gb">Tillverknings&aring;r</td>
+                <td colspan="4">{{tillverkningsar}}</td>
+              </tr>
+              <tr>
+                <td class="grey-gb">Motor, fabrikat, typ</td>
+                <td colspan="4">{{motorfabrikat}}</td>
+              </tr>
+              <tr>
+                <td class="grey-gb">Motornummer</td>
+                <td colspan="4">{{motornummer}}</td>
+              </tr>
+              <tr>
+                <td class="grey-gb">Motoreffekt</td>
+                <td colspan="4">{{motoreffekt}}</td>
+              </tr>
+              <tr>
+                <td class="grey-gb">Volym</td>
+                <td colspan="4">{{motorvolym}}</td>
+              </tr>
+              <tr>
+                <td class="grey-gb">Uppfyller avgaskrav enligt</td>
+                <td colspan="4">{{uppfyller_avgaskrav}}</td>
+              </tr>
+              <tr>
+                <td class="grey-gb">Certifikatnummer</td>
+                <td colspan="4">{{certifikat_nummer}}</td>
+              </tr>
+              <tr>
+                <td class="grey-gb">Rekommenderat br&auml;nsle</td>
+                <td colspan="4">{{rek_bransle}}</td>
+              </tr>
+              {{originalmotor_block}}
+            </table>
+            <p>* Uppgifterna kr&auml;vs inte f&ouml;r maskiner levererade f&ouml;re 1999-01-01.</p>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <b>KEMISKA PRODUKTER</b>
+            <table cellpadding="5" cellspacing="0" width="100%" class="inline-table">
+              <tr>
+                <td width="25%" class="grey-gb">Hydraulolja</td>
+                <td width="75%">
+                  (OBS! endast FB maskiner)
+                  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{{hyudralolja}}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <h3 style="margin-top: 20px; margin-bottom: 5px;">
+              Montering av ers&auml;ttningsmotor utf&ouml;rd av:
+            </h3>
+            <table cellpadding="5" cellspacing="0" width="100%" class="inline-table">
+              <tr>
+                <td width="25%" class="grey-gb">F&ouml;retag:</td>
+                <td width="25%">&nbsp;</td>
+                <td width="25%" class="grey-gb">Datum:</td>
+                <td width="25%">&nbsp;</td>
+              </tr>
+              <tr>
+                <td class="grey-gb">Adress:</td>
+                <td>&nbsp;</td>
+                <td class="grey-gb">Mont&ouml;r:</td>
+                <td>&nbsp;</td>
+              </tr>
+              <tr>
+                <td class="grey-gb">Telefon:</td>
+                <td>&nbsp;</td>
+                <td class="grey-gb">Fax:</td>
+                <td>&nbsp;</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <h3 style="margin-bottom: -5px;">
+              Tillverkare av maskin och leverant&ouml;r av ers&auml;ttningsmotor.
+            </h3>
+            {{footer_block}}
+          </td>
+        </tr>
+      </table>
+    </div>
+  </body>
+</html>

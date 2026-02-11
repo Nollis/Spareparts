@@ -1,0 +1,35 @@
+[
+  {
+    "type": "produkt",
+    "category_path": "f50\\engine",
+    "artikel_id": "",
+    "name_sv": "Engine",
+    "desc_sv": "Desc",
+    "name_en": "Engine",
+    "desc_en": "Desc",
+    "number": "1",
+    "no_units": ""
+  },
+  {
+    "type": "kategori",
+    "category_path": "f50\\engine\\parts",
+    "artikel_id": "",
+    "name_sv": "Parts",
+    "desc_sv": "Desc",
+    "name_en": "Parts",
+    "desc_en": "Desc",
+    "number": "2",
+    "no_units": ""
+  },
+  {
+    "type": "artikel",
+    "category_path": "f50\\engine\\parts",
+    "artikel_id": "SKU123",
+    "name_sv": "Part A",
+    "desc_sv": "Desc",
+    "name_en": "Part A",
+    "desc_en": "Desc",
+    "number": "10",
+    "no_units": "2"
+  }
+]

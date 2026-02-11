@@ -1,0 +1,9 @@
+node_modules/
+.data/
+data/
+output/
+storage/
+ce/pdfs/
+*.sqlite
+.DS_Store
+.env

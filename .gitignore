@@ -4,6 +4,12 @@ data/
 output/
 storage/
 ce/pdfs/
+images/
+*.pdf
+*.zip
+*.jpg
+*.png
+*.sqlite
 *.sqlite
 .DS_Store
 .env

@@ -124,7 +124,11 @@ export async function get(store, key) {
       }
       return Buffer.concat(chunks);
     } catch (err) {
-      if (err.name === "NoSuchKey") return null;
+      const code = err?.name || err?.Code || err?.code;
+      const status = Number(err?.$metadata?.httpStatusCode || 0);
+      if (code === "NoSuchKey" || code === "NotFound" || code === "NoSuchBucket") return null;
+      if (code === "AccessDenied" || code === "Forbidden") return null;
+      if (status === 403 || status === 404) return null;
       throw err;
     }
   }

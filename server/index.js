@@ -1067,10 +1067,15 @@ if (storage.useSpacesStorage()) {
   app.get("/json/:filename", async (req, res) => {
     const fn = req.params.filename;
     if (!fn || fn.includes("..")) return res.status(400).end();
-    const data = await storage.get("json", fn);
-    if (!data) return res.status(404).end();
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
-    res.send(data);
+    try {
+      const data = await storage.get("json", fn);
+      if (!data) return res.status(404).end();
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.send(data);
+    } catch (error) {
+      console.error("Failed to serve JSON file:", fn, error?.message || error);
+      res.status(500).json({ error: "Failed to load JSON resource." });
+    }
   });
   app.use("/files", express.static(outputDir));
 } else {

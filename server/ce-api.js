@@ -4,8 +4,11 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PDFDocument, StandardFonts } from "pdf-lib";
+import * as storage from "./storage.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const usePostgres = Boolean(process.env.DATABASE_URL?.trim());
 
 export function registerCeRoutes(app) {
   const baseDir = resolve(__dirname, "..", "ce");
@@ -23,21 +26,21 @@ export function registerCeRoutes(app) {
   const shouldGenerateMotorintyg = process.env.CE_GENERATE_MOTORINTYG_PDFS !== "0";
   const shouldGenerateCe = process.env.CE_GENERATE_CE_PDFS !== "0";
 
-  mkdirSync(pdfDir, { recursive: true });
+  if (!storage.useSpacesStorage()) {
+    mkdirSync(pdfDir, { recursive: true });
+  }
   mkdirSync(motorintygAssetsDir, { recursive: true });
   mkdirSync(ceAssetsDir, { recursive: true });
 
-  function openDatabase() {
-    const db = new DatabaseSync(dbPath);
-    db.exec("PRAGMA foreign_keys = ON;");
+  let ceDb = null;
+  if (!usePostgres) {
+    ceDb = new DatabaseSync(dbPath);
+    ceDb.exec("PRAGMA foreign_keys = ON;");
     if (existsSync(schemaPath)) {
       const schema = readFileSync(schemaPath, "utf8");
-      db.exec(schema);
+      ceDb.exec(schema);
     }
-    return db;
   }
-
-  const db = openDatabase();
 
   const queries = {
     searchProducts:
@@ -100,16 +103,28 @@ export function registerCeRoutes(app) {
       WHERE modellNamn = ?`
   };
 
-  function queryAll(sql, params = []) {
-    return db.prepare(sql).all(...params);
+  async function ceQueryAll(sql, params = []) {
+    if (usePostgres) {
+      const { queryAll } = await import("./db.js");
+      return queryAll(sql, params);
+    }
+    return ceDb.prepare(sql).all(...params);
   }
 
-  function queryGet(sql, params = []) {
-    return db.prepare(sql).get(...params);
+  async function ceQueryGet(sql, params = []) {
+    if (usePostgres) {
+      const { queryGet } = await import("./db.js");
+      return queryGet(sql, params);
+    }
+    return ceDb.prepare(sql).get(...params) ?? null;
   }
 
-  function queryRun(sql, params = []) {
-    return db.prepare(sql).run(...params);
+  async function ceQueryRun(sql, params = []) {
+    if (usePostgres) {
+      const { queryRun } = await import("./db.js");
+      return queryRun(sql, params);
+    }
+    return ceDb.prepare(sql).run(...params);
   }
 
   function ensureText(value) {
@@ -243,8 +258,8 @@ export function registerCeRoutes(app) {
     return { logoBlock, introBlock, footerBlock, originalBlock };
   }
 
-  function buildMotorintygData(serial) {
-    const product = queryGet(queries.getProduct, [serial]);
+  async function buildMotorintygData(serial) {
+    const product = await ceQueryGet(queries.getProduct, [serial]);
     if (!product) {
       return null;
     }
@@ -293,32 +308,27 @@ export function registerCeRoutes(app) {
 
   async function generateMotorintygPdf(serial) {
     const template = readMotorintygTemplate();
-    if (!template) {
-      throw new Error("Motorintyg template not found");
-    }
-    const data = buildMotorintygData(serial);
-    if (!data) {
-      throw new Error("Product not found");
-    }
+    if (!template) throw new Error("Motorintyg template not found");
+    const data = await buildMotorintygData(serial);
+    if (!data) throw new Error("Product not found");
     const html = renderTemplate(template, data);
-    const outputPath = resolve(pdfDir, `motorintyg-${serial}.pdf`);
+    const key = `motorintyg-${serial}.pdf`;
 
     const { chromium } = await import("playwright");
     const browser = await chromium.launch();
     try {
       const page = await browser.newPage({ viewport: { width: 800, height: 1131 } });
       await page.setContent(html, { waitUntil: "load" });
-      await page.pdf({
-        path: outputPath,
+      const pdfBytes = await page.pdf({
         format: "A4",
         printBackground: true,
         margin: { top: "0", bottom: "0", left: "0", right: "0" }
       });
+      await storage.put("ce-pdfs", key, Buffer.from(pdfBytes));
     } finally {
       await browser.close();
     }
-
-    return outputPath;
+    return key;
   }
 
   function buildCeBlocks(data) {
@@ -334,8 +344,8 @@ export function registerCeRoutes(app) {
     return { supplierBlock, placeAndDate, signatureBlock };
   }
 
-  function buildCeData(serial) {
-    const product = queryGet(queries.getProduct, [serial]);
+  async function buildCeData(serial) {
+    const product = await ceQueryGet(queries.getProduct, [serial]);
     if (!product) {
       return null;
     }
@@ -377,33 +387,28 @@ export function registerCeRoutes(app) {
 
   async function generateCePdf(serial) {
     const template = readCeTemplate();
-    if (!template) {
-      throw new Error("CE template not found");
-    }
-    const data = buildCeData(serial);
-    if (!data) {
-      throw new Error("Product not found");
-    }
+    if (!template) throw new Error("CE template not found");
+    const data = await buildCeData(serial);
+    if (!data) throw new Error("Product not found");
     const html = renderTemplate(template, data);
-    const outputPath = resolve(pdfDir, `ce-${serial}.pdf`);
+    const key = `ce-${serial}.pdf`;
 
     const { chromium } = await import("playwright");
     const browser = await chromium.launch();
     try {
       const page = await browser.newPage({ viewport: { width: 1122, height: 793 } });
       await page.setContent(html, { waitUntil: "load" });
-      await page.pdf({
-        path: outputPath,
+      const pdfBytes = await page.pdf({
         format: "A4",
         landscape: true,
         printBackground: true,
         margin: { top: "0", bottom: "0", left: "0", right: "0" }
       });
+      await storage.put("ce-pdfs", key, Buffer.from(pdfBytes));
     } finally {
       await browser.close();
     }
-
-    return outputPath;
+    return key;
   }
 
   function buildProductPayload(body) {
@@ -458,7 +463,7 @@ export function registerCeRoutes(app) {
     };
   }
 
-  async function writePlaceholderPdf({ title, serial, filePath }) {
+  async function writePlaceholderPdf({ title, serial, key }) {
     const pdfDoc = await PDFDocument.create();
     const page = pdfDoc.addPage([595, 842]);
     const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -467,41 +472,39 @@ export function registerCeRoutes(app) {
     page.drawText(`Serial: ${serial}`, { x: 48, y: 720, size: 16, font: mono });
     page.drawText("Placeholder document", { x: 48, y: 690, size: 12, font: mono });
     const pdfBytes = await pdfDoc.save();
-    writeFileSync(filePath, pdfBytes);
+    await storage.put("ce-pdfs", key, pdfBytes);
   }
 
-  function canonicalizeSerial(rawSerial) {
+  async function canonicalizeSerial(rawSerial) {
     const serial = ensureText(rawSerial).trim();
     if (!serial) {
       return "";
     }
-    const variants = queryAll("SELECT serienummer FROM ce_products WHERE TRIM(serienummer) = ?", [serial]);
+    const variants = await ceQueryAll("SELECT serienummer FROM ce_products WHERE TRIM(serienummer) = ?", [serial]);
     if (variants.length === 0) {
       return serial;
     }
     const hasExact = variants.some((row) => row.serienummer === serial);
     if (!hasExact && variants[0]?.serienummer) {
-      queryRun("UPDATE ce_products SET serienummer = ? WHERE serienummer = ?", [serial, variants[0].serienummer]);
+      await ceQueryRun("UPDATE ce_products SET serienummer = ? WHERE serienummer = ?", [serial, variants[0].serienummer]);
     }
-    variants.forEach((row) => {
+    for (const row of variants) {
       if (row.serienummer !== serial) {
-        queryRun("DELETE FROM ce_products WHERE serienummer = ?", [row.serienummer]);
+        await ceQueryRun("DELETE FROM ce_products WHERE serienummer = ?", [row.serienummer]);
       }
-    });
+    }
     return serial;
   }
 
   async function ensurePlaceholderPdfs(serial) {
-    if (!serial || !shouldGeneratePlaceholders) {
-      return;
+    if (!serial || !shouldGeneratePlaceholders) return;
+    const ceKey = `ce-${serial}.pdf`;
+    const motorintygKey = `motorintyg-${serial}.pdf`;
+    if (!(await storage.exists("ce-pdfs", ceKey)) && !shouldGenerateCe) {
+      await writePlaceholderPdf({ title: "CE DOCUMENT", serial, key: ceKey });
     }
-    const cePath = resolve(pdfDir, `ce-${serial}.pdf`);
-    const motorintygPath = resolve(pdfDir, `motorintyg-${serial}.pdf`);
-    if (!existsSync(cePath) && !shouldGenerateCe) {
-      await writePlaceholderPdf({ title: "CE DOCUMENT", serial, filePath: cePath });
-    }
-    if (!existsSync(motorintygPath) && !shouldGenerateMotorintyg) {
-      await writePlaceholderPdf({ title: "MOTORINTYG", serial, filePath: motorintygPath });
+    if (!(await storage.exists("ce-pdfs", motorintygKey)) && !shouldGenerateMotorintyg) {
+      await writePlaceholderPdf({ title: "MOTORINTYG", serial, key: motorintygKey });
     }
   }
 
@@ -513,25 +516,25 @@ export function registerCeRoutes(app) {
     res.json({ ok: true, dbPath });
   });
 
-  router.post("/ce-och-motorintyg-products-search", (req, res) => {
+  router.post("/ce-och-motorintyg-products-search", async (req, res) => {
     try {
       const searchText = ensureText(req.body?.serienummerText).trim();
       if (!searchText) {
         res.json([]);
         return;
       }
-      const results = queryAll(queries.searchProducts, [`%${searchText}%`]);
+      const results = await ceQueryAll(queries.searchProducts, [`%${searchText}%`]);
       res.json(results);
     } catch (error) {
       res.status(500).json({ error: error.message || "Server error" });
     }
   });
 
-  router.get("/get-single-ce-och-motorintyg-product/:serial", (req, res) => {
+  router.get("/get-single-ce-och-motorintyg-product/:serial", async (req, res) => {
     try {
-      const serial = canonicalizeSerial(req.params.serial);
-      const item = serial ? queryGet(queries.getProduct, [serial]) : null;
-      const modelNames = queryAll(queries.listModelNames);
+      const serial = await canonicalizeSerial(req.params.serial);
+      const item = serial ? await ceQueryGet(queries.getProduct, [serial]) : null;
+      const modelNames = await ceQueryAll(queries.listModelNames);
       res.json({
         databaseResults: item ? [item] : [],
         availableModelNames: modelNames
@@ -541,19 +544,19 @@ export function registerCeRoutes(app) {
     }
   });
 
-  router.post("/create-new-ce-och-motorintyg-product", (req, res) => {
+  router.post("/create-new-ce-och-motorintyg-product", async (req, res) => {
     try {
-      const serial = canonicalizeSerial(req.body?.serienummer);
+      const serial = await canonicalizeSerial(req.body?.serienummer);
       if (!serial) {
         res.json(false);
         return;
       }
-      const existing = queryGet(queries.getProduct, [serial]);
+      const existing = await ceQueryGet(queries.getProduct, [serial]);
       if (existing) {
         res.json(false);
         return;
       }
-      queryRun(queries.createProduct, [serial]);
+      await ceQueryRun(queries.createProduct, [serial]);
       res.json(true);
     } catch (error) {
       res.status(500).json({ error: error.message || "Server error" });
@@ -562,17 +565,17 @@ export function registerCeRoutes(app) {
 
   router.post("/save-ce-och-motorintyg-product", async (req, res) => {
     try {
-      const serial = canonicalizeSerial(req.body?.serienummer);
+      const serial = await canonicalizeSerial(req.body?.serienummer);
       if (!serial) {
         res.json(false);
         return;
       }
       const payload = buildProductPayload(req.body || {});
-      const existing = queryGet(queries.getProduct, [serial]);
+      const existing = await ceQueryGet(queries.getProduct, [serial]);
       if (!existing) {
-        queryRun(queries.createProduct, [serial]);
+        await ceQueryRun(queries.createProduct, [serial]);
       }
-      queryRun(queries.updateProduct, [
+      await ceQueryRun(queries.updateProduct, [
         payload.modell,
         payload.motornummer,
         payload.tillverkningsar,
@@ -615,71 +618,67 @@ export function registerCeRoutes(app) {
     }
   });
 
-  router.post("/delete-ce-och-motorintyg-product", (req, res) => {
+  router.post("/delete-ce-och-motorintyg-product", async (req, res) => {
     try {
-      const serial = canonicalizeSerial(req.body?.serienummer);
+      const serial = await canonicalizeSerial(req.body?.serienummer);
       if (!serial) {
         res.json(false);
         return;
       }
-      queryRun(queries.deleteProduct, [serial]);
-      const cePath = resolve(pdfDir, `ce-${serial}.pdf`);
-      const motorintygPath = resolve(pdfDir, `motorintyg-${serial}.pdf`);
-      if (existsSync(cePath)) {
-        unlinkSync(cePath);
-      }
-      if (existsSync(motorintygPath)) {
-        unlinkSync(motorintygPath);
-      }
+      await ceQueryRun(queries.deleteProduct, [serial]);
+      const ceKey = `ce-${serial}.pdf`;
+      const motorintygKey = `motorintyg-${serial}.pdf`;
+      if (await storage.exists("ce-pdfs", ceKey)) await storage.remove("ce-pdfs", ceKey);
+      if (await storage.exists("ce-pdfs", motorintygKey)) await storage.remove("ce-pdfs", motorintygKey);
       res.json(true);
     } catch (error) {
       res.status(500).json({ error: error.message || "Server error" });
     }
   });
 
-  router.get("/get-all-ce-och-motorintyg-models", (req, res) => {
+  router.get("/get-all-ce-och-motorintyg-models", async (req, res) => {
     try {
-      const results = queryAll(queries.listModels);
+      const results = await ceQueryAll(queries.listModels);
       res.json(results);
     } catch (error) {
       res.status(500).json({ error: error.message || "Server error" });
     }
   });
 
-  router.post("/get-single-ce-och-motorintyg-model", (req, res) => {
+  router.post("/get-single-ce-och-motorintyg-model", async (req, res) => {
     try {
       const name = ensureText(req.body?.modellNamn).trim();
       if (!name) {
         res.json(null);
         return;
       }
-      const result = queryGet(queries.getModel, [name]);
+      const result = await ceQueryGet(queries.getModel, [name]);
       res.json(result || null);
     } catch (error) {
       res.status(500).json({ error: error.message || "Server error" });
     }
   });
 
-  router.post("/create-new-ce-och-motorintyg-model", (req, res) => {
+  router.post("/create-new-ce-och-motorintyg-model", async (req, res) => {
     try {
       const name = ensureText(req.body?.modellNamn).trim();
       if (!name) {
         res.json(false);
         return;
       }
-      const existing = queryGet(queries.getModel, [name]);
+      const existing = await ceQueryGet(queries.getModel, [name]);
       if (existing) {
         res.json(false);
         return;
       }
-      queryRun(queries.createModel, [name]);
+      await ceQueryRun(queries.createModel, [name]);
       res.json(true);
     } catch (error) {
       res.status(500).json({ error: error.message || "Server error" });
     }
   });
 
-  router.post("/save-ce-och-motorintyg-model", (req, res) => {
+  router.post("/save-ce-och-motorintyg-model", async (req, res) => {
     try {
       const name = ensureText(req.body?.modellNamn).trim();
       if (!name) {
@@ -687,11 +686,11 @@ export function registerCeRoutes(app) {
         return;
       }
       const payload = buildModelPayload(req.body || {});
-      const existing = queryGet(queries.getModel, [name]);
+      const existing = await ceQueryGet(queries.getModel, [name]);
       if (!existing) {
-        queryRun(queries.createModel, [name]);
+        await ceQueryRun(queries.createModel, [name]);
       }
-      queryRun(queries.updateModel, [
+      await ceQueryRun(queries.updateModel, [
         payload.maskinslag_ce,
         payload.maskinslag,
         payload.fabrikat,
@@ -719,14 +718,14 @@ export function registerCeRoutes(app) {
     }
   });
 
-  router.post("/delete-ce-och-motorintyg-model", (req, res) => {
+  router.post("/delete-ce-och-motorintyg-model", async (req, res) => {
     try {
       const name = ensureText(req.body?.modellNamn).trim();
       if (!name) {
         res.json(false);
         return;
       }
-      queryRun(queries.deleteModel, [name]);
+      await ceQueryRun(queries.deleteModel, [name]);
       res.json(true);
     } catch (error) {
       res.status(500).json({ error: error.message || "Server error" });
@@ -740,18 +739,18 @@ export function registerCeRoutes(app) {
         res.json(false);
         return;
       }
-      const cePath = resolve(pdfDir, `ce-${serial}.pdf`);
-      const motorintygPath = resolve(pdfDir, `motorintyg-${serial}.pdf`);
+      const ceKey = `ce-${serial}.pdf`;
+      const motorintygKey = `motorintyg-${serial}.pdf`;
       const created = [];
-      if (!existsSync(cePath)) {
-        await writePlaceholderPdf({ title: "CE DOCUMENT", serial, filePath: cePath });
-        created.push(cePath);
+      if (!(await storage.exists("ce-pdfs", ceKey))) {
+        await writePlaceholderPdf({ title: "CE DOCUMENT", serial, key: ceKey });
+        created.push(ceKey);
       }
-      if (!existsSync(motorintygPath)) {
-        await writePlaceholderPdf({ title: "MOTORINTYG", serial, filePath: motorintygPath });
-        created.push(motorintygPath);
+      if (!(await storage.exists("ce-pdfs", motorintygKey))) {
+        await writePlaceholderPdf({ title: "MOTORINTYG", serial, key: motorintygKey });
+        created.push(motorintygKey);
       }
-      res.json({ ok: true, created, dir: pdfDir });
+      res.json({ ok: true, created, dir: storage.getLocalDir("ce-pdfs") || pdfDir });
     } catch (error) {
       res.status(500).json({ error: error.message || "Server error" });
     }
@@ -787,5 +786,15 @@ export function registerCeRoutes(app) {
 
   app.use("/api/ce", router);
   app.use("/wp-json/wccd/v1", router);
-  app.use("/ce/pdfs", express.static(pdfDir));
+  if (storage.useSpacesStorage()) {
+    app.get("/ce/pdfs/:filename", (req, res) => {
+      const filename = req.params.filename;
+      if (!filename || filename.includes("..")) return res.status(400).end();
+      const url = storage.getPublicUrl("ce-pdfs", filename);
+      if (!url || !url.startsWith("http")) return res.status(404).end();
+      res.redirect(302, url);
+    });
+  } else {
+    app.use("/ce/pdfs", express.static(pdfDir));
+  }
 }

@@ -1,14 +1,13 @@
 import "dotenv/config";
 import express from "express";
 import multer from "multer";
-import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
 import AdmZip from "adm-zip";
 import { parse } from "csv-parse/sync";
 import { registerCeRoutes } from "./ce-api.js";
-import { runMigrations } from "./migrations.js";
+import { initDb, queryAll, queryGet, queryRun, isPostgres, getDb } from "./db.js";
 import {
   normalizeHeader,
   parseCsv,
@@ -24,14 +23,13 @@ import {
   writeJsonValidated,
   writeContractManifest
 } from "./json-contract.js";
+import * as storage from "./storage.js";
 
 import cors from "cors";
 const app = express();
 app.use(cors());
 
 const port = Number(process.env.MANAGER_API_PORT || 8788);
-const dbPath = process.env.MANAGER_DB_PATH || resolve("data", "manager.sqlite");
-const schemaPath = process.env.MANAGER_SCHEMA_PATH || resolve("db", "schema.sql");
 const dataDir = process.env.MANAGER_DATA_DIR || resolve("data");
 const tmpDir = process.env.MANAGER_TMP_DIR || resolve(dataDir, "tmp");
 const categoryImagesDir =
@@ -56,21 +54,13 @@ function ensureDir(path) {
 
 ensureDir(dataDir);
 ensureDir(tmpDir);
-ensureDir(categoryImagesDir);
-ensureDir(catalogImagesDir);
-ensureDir(outputDir);
-ensureDir(jsonDir);
-
-async function openDatabase() {
-  const db = new DatabaseSync(dbPath);
-  if (existsSync(schemaPath)) {
-    const schema = readFileSync(schemaPath, "utf8");
-    db.exec(schema);
-  }
-  db.exec("PRAGMA busy_timeout = 5000;");
-  await runMigrations(db);
-  return db;
+if (!storage.useSpacesStorage()) {
+  ensureDir(categoryImagesDir);
+  ensureDir(catalogImagesDir);
+  ensureDir(outputDir);
+  ensureDir(jsonDir);
 }
+
 
 function loadWpCachedCategories(mainKey) {
   if (!mainKey) return null;
@@ -86,19 +76,7 @@ function loadWpCachedCategories(mainKey) {
   }
 }
 
-const db = await openDatabase();
-
-function queryAll(sql, params = []) {
-  return db.prepare(sql).all(...params);
-}
-
-function queryGet(sql, params = []) {
-  return db.prepare(sql).get(...params);
-}
-
-function queryRun(sql, params = []) {
-  return db.prepare(sql).run(...params);
-}
+await initDb();
 
 function clampLimit(value, fallback = 200, max = 500) {
   const parsed = Number(value);
@@ -115,8 +93,8 @@ function normalizeBoolean(value) {
   return 0;
 }
 
-function getSetting(key, fallbackValue = null) {
-  const row = queryGet("SELECT value FROM settings WHERE key = ?", [key]);
+async function getSetting(key, fallbackValue = null) {
+  const row = await queryGet("SELECT value FROM settings WHERE key = ?", [key]);
   if (!row || !row.value) {
     return fallbackValue;
   }
@@ -127,9 +105,9 @@ function getSetting(key, fallbackValue = null) {
   }
 }
 
-function setSetting(key, value) {
+async function setSetting(key, value) {
   const payload = JSON.stringify(value ?? null);
-  queryRun(
+  await queryRun(
     `INSERT INTO settings (key, value, updated_at)
      VALUES (?, ?, datetime('now'))
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
@@ -203,20 +181,20 @@ function clearSessionCookie(res) {
   );
 }
 
-function cleanupExpiredSessions() {
-  queryRun("DELETE FROM sessions WHERE expires_at <= datetime('now')");
+async function cleanupExpiredSessions() {
+  await queryRun("DELETE FROM sessions WHERE expires_at <= datetime('now')");
 }
 
-function buildUserResponse(userRow) {
+async function buildUserResponse(userRow) {
   if (!userRow) return null;
   const company = userRow.company_id
-    ? queryGet(
+    ? await queryGet(
       "SELECT id, name, customer_number, discount_percent, country_code, no_pyramid_import FROM companies WHERE id = ?",
       [userRow.company_id]
     )
     : null;
   const deliveryAddresses = company
-    ? queryAll(
+    ? await queryAll(
       `SELECT id, attn_first_name, attn_last_name, street, street_2, zip_code, postal_area, country, delivery_id
          FROM delivery_addresses WHERE company_id = ? ORDER BY id ASC`,
       [company.id]
@@ -256,13 +234,13 @@ function buildUserResponse(userRow) {
   };
 }
 
-function getAuthenticatedUser(req) {
-  cleanupExpiredSessions();
+async function getAuthenticatedUser(req) {
+  await cleanupExpiredSessions();
   const cookies = parseCookies(req);
   const token = cookies[SESSION_COOKIE];
   if (!token) return null;
   const tokenHash = hashSessionToken(token);
-  const session = queryGet(
+  const session = await queryGet(
     `SELECT s.id, s.user_id, s.expires_at, u.*
      FROM sessions s
      JOIN users u ON u.id = s.user_id
@@ -270,12 +248,12 @@ function getAuthenticatedUser(req) {
     [tokenHash]
   );
   if (!session) return null;
-  const isExpired = queryGet("SELECT datetime('now') >= ? AS expired", [session.expires_at])?.expired;
+  const isExpired = (await queryGet("SELECT datetime('now') >= ? AS expired", [session.expires_at]))?.expired;
   if (isExpired) {
-    queryRun("DELETE FROM sessions WHERE id = ?", [session.id]);
+    await queryRun("DELETE FROM sessions WHERE id = ?", [session.id]);
     return null;
   }
-  queryRun("UPDATE sessions SET last_seen_at = datetime('now') WHERE id = ?", [session.id]);
+  await queryRun("UPDATE sessions SET last_seen_at = datetime('now') WHERE id = ?", [session.id]);
   return session;
 }
 
@@ -334,7 +312,7 @@ function normalizeCurrencyCode(value) {
   return normalizeText(value).toUpperCase().replace(/[^A-Z]/g, "");
 }
 
-function getPriceCurrencySettings() {
+async function getPriceCurrencySettings() {
   const defaultSettings = {
     baseCurrency: "SEK",
     currencies: [{ code: "SEK", name: "Swedish krona", rate: 1 }]
@@ -412,89 +390,86 @@ function resolveParentKey(pathValue) {
 }
 
 
-const upsertCategory = db.prepare(`
-  INSERT INTO categories (key, path, name_sv, desc_sv, name_en, desc_en, name_pl, desc_pl, position, parent_key, is_main, catalog_image, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-  ON CONFLICT(key) DO UPDATE SET
-    path = excluded.path,
-    name_sv = excluded.name_sv,
-    desc_sv = excluded.desc_sv,
-    name_en = excluded.name_en,
-    desc_en = excluded.desc_en,
-    name_pl = COALESCE(excluded.name_pl, categories.name_pl),
-    desc_pl = COALESCE(excluded.desc_pl, categories.desc_pl),
-    position = excluded.position,
-    parent_key = excluded.parent_key,
-    is_main = excluded.is_main,
-    catalog_image = COALESCE(excluded.catalog_image, categories.catalog_image),
-    updated_at = datetime('now')
-`);
+async function upsertCategory(key, path, nameSv, descSv, nameEn, descEn, namePl, descPl, position, parentKey, isMain, catalogImage) {
+  await queryRun(
+    `INSERT INTO categories (key, path, name_sv, desc_sv, name_en, desc_en, name_pl, desc_pl, position, parent_key, is_main, catalog_image, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET
+       path = excluded.path,
+       name_sv = excluded.name_sv,
+       desc_sv = excluded.desc_sv,
+       name_en = excluded.name_en,
+       desc_en = excluded.desc_en,
+       name_pl = COALESCE(excluded.name_pl, categories.name_pl),
+       desc_pl = COALESCE(excluded.desc_pl, categories.desc_pl),
+       position = excluded.position,
+       parent_key = excluded.parent_key,
+       is_main = excluded.is_main,
+       catalog_image = COALESCE(excluded.catalog_image, categories.catalog_image),
+       updated_at = datetime('now')`,
+    [key, path, nameSv, descSv, nameEn, descEn, namePl, descPl, position, parentKey, isMain, catalogImage]
+  );
+}
 
-const upsertProduct = db.prepare(`
-  INSERT INTO products (sku, name_sv, desc_sv, name_en, desc_en, name_pl, desc_pl, price, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-  ON CONFLICT(sku) DO UPDATE SET
-    name_sv = excluded.name_sv,
-    desc_sv = excluded.desc_sv,
-    name_en = excluded.name_en,
-    desc_en = excluded.desc_en,
-    name_pl = COALESCE(excluded.name_pl, products.name_pl),
-    desc_pl = COALESCE(excluded.desc_pl, products.desc_pl),
-    price = COALESCE(excluded.price, products.price),
-    updated_at = datetime('now')
-`);
+async function upsertProduct(sku, nameSv, descSv, nameEn, descEn, namePl, descPl, price) {
+  await queryRun(
+    `INSERT INTO products (sku, name_sv, desc_sv, name_en, desc_en, name_pl, desc_pl, price, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(sku) DO UPDATE SET
+       name_sv = excluded.name_sv,
+       desc_sv = excluded.desc_sv,
+       name_en = excluded.name_en,
+       desc_en = excluded.desc_en,
+       name_pl = COALESCE(excluded.name_pl, products.name_pl),
+       desc_pl = COALESCE(excluded.desc_pl, products.desc_pl),
+       price = COALESCE(excluded.price, products.price),
+       updated_at = datetime('now')`,
+    [sku, nameSv, descSv, nameEn, descEn, namePl, descPl, price]
+  );
+}
 
-const insertProductCategory = db.prepare(
-  "INSERT OR IGNORE INTO product_categories (product_sku, category_key, pos_num, no_units) VALUES (?, ?, ?, ?)"
-);
+async function insertProductCategory(productSku, categoryKey, posNum, noUnits) {
+  await queryRun(
+    "INSERT OR IGNORE INTO product_categories (product_sku, category_key, pos_num, no_units) VALUES (?, ?, ?, ?)",
+    [productSku, categoryKey, posNum, noUnits]
+  );
+}
 
-function importZip(buffer) {
+async function importZip(buffer) {
   const zip = new AdmZip(buffer);
   let count = 0;
-  zip.getEntries().forEach((entry) => {
-    if (entry.isDirectory) {
-      return;
-    }
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue;
     const ext = extname(entry.entryName).toLowerCase();
-    if (!ext) {
-      return;
-    }
+    if (!ext) continue;
     const base = sanitizeFileName(basename(entry.entryName, ext));
-    if (!base) {
-      return;
-    }
+    if (!base) continue;
     const outputName = `${base}${ext}`;
-    const outputPath = resolve(categoryImagesDir, outputName);
-    writeFileSync(outputPath, entry.getData());
+    await storage.put("category-images", outputName, entry.getData());
     count += 1;
-  });
+  }
   return count;
 }
 
-function saveCatalogImage(buffer, originalName, mainKey) {
+async function saveCatalogImage(buffer, originalName, mainKey) {
   if (!mainKey) {
     return "";
   }
   const ext = extname(originalName).toLowerCase() || ".jpg";
   const fileName = `product_catalog_image-${mainKey}${ext}`;
-  const outputPath = resolve(catalogImagesDir, fileName);
-  writeFileSync(outputPath, buffer);
-  queryRun("UPDATE categories SET catalog_image = ?, updated_at = datetime('now') WHERE key = ?", [
+  await storage.put("catalog-images", fileName, buffer);
+  await queryRun("UPDATE categories SET catalog_image = ?, updated_at = datetime('now') WHERE key = ?", [
     fileName,
     mainKey
   ]);
   return fileName;
 }
 
-function removeCatalogImage(fileName) {
-  if (!fileName) {
-    return;
-  }
+async function removeCatalogImage(fileName) {
+  if (!fileName) return;
   const safeName = basename(fileName);
-  const filePath = resolve(catalogImagesDir, safeName);
-  if (existsSync(filePath)) {
-    rmSync(filePath, { force: true });
-  }
+  const ok = await storage.exists("catalog-images", safeName);
+  if (ok) await storage.remove("catalog-images", safeName);
 }
 
 function collectImageBasesForCategory(key, pathValue = "") {
@@ -515,33 +490,23 @@ function collectImageBasesForCategory(key, pathValue = "") {
   return bases;
 }
 
-function removeCategoryImagesByBases(baseNames) {
-  if (!baseNames || baseNames.size === 0) {
-    return 0;
-  }
-  if (!existsSync(categoryImagesDir)) {
-    return 0;
-  }
+async function removeCategoryImagesByBases(baseNames) {
+  if (!baseNames || baseNames.size === 0) return 0;
+  const files = await storage.list("category-images", "");
   let removed = 0;
-  const files = readdirSync(categoryImagesDir, { withFileTypes: true });
-  files.forEach((entry) => {
-    if (!entry.isFile()) {
-      return;
-    }
-    const base = sanitizeFileName(basename(entry.name, extname(entry.name)));
+  for (const name of files) {
+    const base = sanitizeFileName(basename(name, extname(name)));
     if (baseNames.has(base)) {
-      rmSync(resolve(categoryImagesDir, entry.name), { force: true });
+      await storage.remove("category-images", name);
       removed += 1;
     }
-  });
+  }
   return removed;
 }
 
-function findImageForKey(key, pathValue = "") {
+async function findImageForKey(key, pathValue = "") {
   const variants = [];
-  if (key) {
-    variants.push(key, sanitizeFileName(key));
-  }
+  if (key) variants.push(key, sanitizeFileName(key));
   if (pathValue) {
     const parts = normalizeText(pathValue).split("\\").filter(Boolean);
     const leaf = parts.length ? parts[parts.length - 1] : "";
@@ -555,20 +520,34 @@ function findImageForKey(key, pathValue = "") {
   for (const base of unique) {
     for (const ext of exts) {
       const fileName = `${base}${ext}`;
-      const filePath = resolve(categoryImagesDir, fileName);
-      if (existsSync(filePath)) {
-        return fileName;
-      }
+      const ok = await storage.exists("category-images", fileName);
+      if (ok) return fileName;
     }
   }
   return "";
 }
 
 function buildPublicUrl(relativePath) {
-  if (!relativePath) {
-    return "";
+  if (!relativePath) return "";
+  const normalized = relativePath.startsWith("/") ? relativePath.slice(1) : relativePath;
+  const pathMap = [
+    ["images/spare-part-images/", "category-images"],
+    ["images/product-catalog-images/", "catalog-images"],
+    ["json/", "json"],
+    ["files/", "output"]
+  ];
+  for (const [prefix, store] of pathMap) {
+    if (normalized.startsWith(prefix)) {
+      const key = normalized.slice(prefix.length);
+      return storage.getPublicUrl(store, key) || `/${normalized}`;
+    }
   }
-  return relativePath.startsWith("/") ? relativePath : `/${relativePath}`;
+  return `/${normalized}`;
+}
+
+function getJsonDest(filename) {
+  if (storage.useSpacesStorage()) return { store: "json", key: filename };
+  return resolve(jsonDir, filename);
 }
 
 function imageMapHasHotspots(html) {
@@ -578,15 +557,15 @@ function imageMapHasHotspots(html) {
   return /<area\b/i.test(html);
 }
 
-function getImageMapRow(categoryKey) {
+async function getImageMapRow(categoryKey) {
   return queryGet(
     "SELECT id, category_key, html, updated_at FROM image_maps WHERE category_key = ?",
     [categoryKey]
   );
 }
 
-function upsertImageMap(categoryKey, html, updatedAt = null) {
-  queryRun(
+async function upsertImageMap(categoryKey, html, updatedAt = null) {
+  await queryRun(
     `INSERT INTO image_maps (category_key, html, updated_at)
      VALUES (?, ?, COALESCE(?, datetime('now')))
      ON CONFLICT(category_key) DO UPDATE SET
@@ -608,8 +587,8 @@ function buildPosLabel(position, name) {
   return posValue;
 }
 
-function getChildCategoriesWithLabels(parentKey) {
-  const rows = queryAll(
+async function getChildCategoriesWithLabels(parentKey) {
+  const rows = await queryAll(
     `SELECT key, name_sv, name_en, position
      FROM categories
      WHERE parent_key = ?
@@ -638,8 +617,8 @@ function getChildCategoriesWithLabels(parentKey) {
   });
 }
 
-function getProductsForCategoryKey(categoryKey) {
-  const rows = queryAll(
+async function getProductsForCategoryKey(categoryKey) {
+  const rows = await queryAll(
     `SELECT p.sku, p.name_sv, p.name_en, p.name_pl, p.desc_sv, p.desc_en, p.desc_pl, pc.pos_num, p.price, pc.no_units
      FROM products p
      JOIN product_categories pc ON pc.product_sku = p.sku
@@ -687,9 +666,9 @@ function getProductsForCategoryKey(categoryKey) {
   }));
 }
 
-function generateJsonForMainKey(mainKey) {
+async function generateJsonForMainKey(mainKey) {
   const likePattern = `${mainKey}-%`;
-  let categories = queryAll(
+  let categories = await queryAll(
     "SELECT * FROM categories WHERE key = ? OR key LIKE ? ORDER BY position ASC, id ASC",
     [mainKey, likePattern]
   );
@@ -731,13 +710,14 @@ function generateJsonForMainKey(mainKey) {
   const categoryByKey = new Map(categories.map((cat) => [cat.key, cat]));
   const categoryIdByKey = new Map(categories.map((cat) => [cat.key, cat.id]));
 
-  const categoryItems = categories.map((cat) => {
-    const name = cat.name_sv || cat.name_en || cat.key;
-    const wpParentKey = wpParentBySlug.get(cat.key) || "";
-    const parentIdFromWp = wpParentKey ? categoryIdByKey.get(wpParentKey) || 0 : 0;
-    const parentId = parentIdFromWp || (cat.parent_key ? categoryIdByKey.get(cat.parent_key) || 0 : 0);
-    const imageFile = findImageForKey(cat.key, cat.path);
-    const imageSrc = imageFile ? buildPublicUrl(`/images/spare-part-images/${imageFile}`) : "";
+  const categoryItems = await Promise.all(
+    categories.map(async (cat) => {
+      const name = cat.name_sv || cat.name_en || cat.key;
+      const wpParentKey = wpParentBySlug.get(cat.key) || "";
+      const parentIdFromWp = wpParentKey ? categoryIdByKey.get(wpParentKey) || 0 : 0;
+      const parentId = parentIdFromWp || (cat.parent_key ? categoryIdByKey.get(cat.parent_key) || 0 : 0);
+      const imageFile = await findImageForKey(cat.key, cat.path);
+      const imageSrc = imageFile ? buildPublicUrl(`/images/spare-part-images/${imageFile}`) : "";
     const catalogSrc = cat.catalog_image
       ? buildPublicUrl(`/images/product-catalog-images/${cat.catalog_image}`)
       : "";
@@ -769,10 +749,11 @@ function generateJsonForMainKey(mainKey) {
       position: positionValue,
       image: imageSrc ? { src: imageSrc } : {}
     };
-    return item;
-  });
+      return item;
+    })
+  );
 
-  const productRows = queryAll(
+  const productRows = await queryAll(
     `SELECT p.*, pc.category_key, pc.pos_num, pc.no_units
      FROM products p
      JOIN product_categories pc ON pc.product_sku = p.sku
@@ -826,32 +807,30 @@ function generateJsonForMainKey(mainKey) {
 
   const productItems = Array.from(productsMap.values());
 
-  const categoriesPath = resolve(jsonDir, `categories-${mainKey}.json`);
-  const productsPath = resolve(jsonDir, `products-${mainKey}.json`);
-  writeJsonValidated(categoriesPath, categoryItems, validateCategoriesJson, "categories export");
-  writeJsonValidated(productsPath, productItems, validateProductsJson, "products export");
-  return [categoriesPath, productsPath];
+  const categoriesKey = `categories-${mainKey}.json`;
+  const productsKey = `products-${mainKey}.json`;
+  await writeJsonValidated(getJsonDest(categoriesKey), categoryItems, validateCategoriesJson, "categories export");
+  await writeJsonValidated(getJsonDest(productsKey), productItems, validateProductsJson, "products export");
+  return [categoriesKey, productsKey];
 }
 
-function generatePriceSettingsJson() {
-  const settings = getPriceCurrencySettings();
-  const settingsPath = resolve(jsonDir, "price-settings.json");
-  writeJsonValidated(settingsPath, settings, validatePriceSettingsJson, "price settings export");
-  return settingsPath;
+async function generatePriceSettingsJson() {
+  const settings = await getPriceCurrencySettings();
+  await writeJsonValidated(getJsonDest("price-settings.json"), settings, validatePriceSettingsJson, "price settings export");
+  return "price-settings.json";
 }
 
-function generateMachineCategoriesJson() {
-  const items = getMachineCategoryHierarchy();
-  const outputPath = resolve(jsonDir, "machine-categories.json");
-  writeJsonValidated(outputPath, items, validateMachineCategoriesJson, "machine categories export");
-  return outputPath;
+async function generateMachineCategoriesJson() {
+  const items = await getMachineCategoryHierarchy();
+  await writeJsonValidated(getJsonDest("machine-categories.json"), items, validateMachineCategoriesJson, "machine categories export");
+  return "machine-categories.json";
 }
 
-function getMainProducts() {
+async function getMainProducts() {
   return queryAll("SELECT key, name_sv, name_en FROM categories WHERE is_main = 1 ORDER BY position ASC, id ASC");
 }
 
-function listCategories({ query = "", limit = 200 } = {}) {
+async function listCategories({ query = "", limit = 200 } = {}) {
   const term = `%${query}%`;
   return queryAll(
     `SELECT id, key, path, parent_key, is_main, position, name_sv, desc_sv, name_en, desc_en, name_pl, desc_pl
@@ -863,9 +842,9 @@ function listCategories({ query = "", limit = 200 } = {}) {
   );
 }
 
-function listProducts({ query = "", limit = 200 } = {}) {
+async function listProducts({ query = "", limit = 200 } = {}) {
   const term = `%${query}%`;
-  const items = queryAll(
+  const items = await queryAll(
     `SELECT sku AS id, sku, name_sv, desc_sv, name_en, desc_en, name_pl, desc_pl, price
      FROM products
      WHERE ? = '' OR sku LIKE ? OR name_sv LIKE ? OR name_en LIKE ? OR desc_sv LIKE ? OR desc_en LIKE ?
@@ -878,7 +857,7 @@ function listProducts({ query = "", limit = 200 } = {}) {
   }
   const skuList = items.map((item) => item.sku);
   const placeholders = skuList.map(() => "?").join(", ");
-  const categoryRows = queryAll(
+  const categoryRows = await queryAll(
     `SELECT product_sku, category_key FROM product_categories WHERE product_sku IN (${placeholders})`,
     skuList
   );
@@ -906,12 +885,12 @@ function listProducts({ query = "", limit = 200 } = {}) {
   }));
 }
 
-function getMachineCategoryLinks(machineCategoryIds) {
+async function getMachineCategoryLinks(machineCategoryIds) {
   if (!machineCategoryIds.length) {
     return new Map();
   }
   const placeholders = machineCategoryIds.map(() => "?").join(", ");
-  const linkRows = queryAll(
+  const linkRows = await queryAll(
     `SELECT machine_category_id, category_key, position, show_for_lang
      FROM machine_category_product_categories
      WHERE machine_category_id IN (${placeholders})
@@ -922,7 +901,7 @@ function getMachineCategoryLinks(machineCategoryIds) {
   const categoryByKey = new Map();
   if (keys.length) {
     const keyPlaceholders = keys.map(() => "?").join(", ");
-    const categoryRows = queryAll(
+    const categoryRows = await queryAll(
       `SELECT id, key, name_sv, name_en, catalog_image, position
        FROM categories
        WHERE key IN (${keyPlaceholders})`,
@@ -968,9 +947,9 @@ function getMachineCategoryLinks(machineCategoryIds) {
   return map;
 }
 
-function listMachineCategories({ query = "", limit = 200 } = {}) {
+async function listMachineCategories({ query = "", limit = 200 } = {}) {
   const term = `%${query}%`;
-  const rows = queryAll(
+  const rows = await queryAll(
     `SELECT id, key, parent_id, position, name_sv, name_en
      FROM machine_categories
      WHERE ? = '' OR key LIKE ? OR name_sv LIKE ? OR name_en LIKE ?
@@ -978,15 +957,15 @@ function listMachineCategories({ query = "", limit = 200 } = {}) {
      LIMIT ?`,
     [query, term, term, term, clampLimit(limit)]
   );
-  const linkMap = getMachineCategoryLinks(rows.map((row) => row.id));
+  const linkMap = await getMachineCategoryLinks(rows.map((row) => row.id));
   return rows.map((row) => ({
     ...row,
     product_categories: linkMap.get(row.id) || []
   }));
 }
 
-function getMachineCategoryHierarchy() {
-  const rows = queryAll(
+async function getMachineCategoryHierarchy() {
+  const rows = await queryAll(
     `SELECT id, key, parent_id, position, name_sv, name_en
      FROM machine_categories
      ORDER BY position ASC, id ASC`
@@ -994,7 +973,7 @@ function getMachineCategoryHierarchy() {
   if (!rows.length) {
     return [];
   }
-  const linkMap = getMachineCategoryLinks(rows.map((row) => row.id));
+  const linkMap = await getMachineCategoryLinks(rows.map((row) => row.id));
   const items = rows.map((row) => {
     const name = row.name_sv || row.name_en || row.key;
     return {
@@ -1070,26 +1049,51 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use("/files", express.static(outputDir));
-app.use("/images/spare-part-images", express.static(categoryImagesDir));
-app.use("/images/product-catalog-images", express.static(catalogImagesDir));
-app.use("/json", express.static(jsonDir));
+if (storage.useSpacesStorage()) {
+  app.get("/images/spare-part-images/:filename", (req, res) => {
+    const fn = req.params.filename;
+    if (!fn || fn.includes("..")) return res.status(400).end();
+    const url = storage.getPublicUrl("category-images", fn);
+    if (url?.startsWith("http")) return res.redirect(302, url);
+    res.status(404).end();
+  });
+  app.get("/images/product-catalog-images/:filename", (req, res) => {
+    const fn = req.params.filename;
+    if (!fn || fn.includes("..")) return res.status(400).end();
+    const url = storage.getPublicUrl("catalog-images", fn);
+    if (url?.startsWith("http")) return res.redirect(302, url);
+    res.status(404).end();
+  });
+  app.get("/json/:filename", (req, res) => {
+    const fn = req.params.filename;
+    if (!fn || fn.includes("..")) return res.status(400).end();
+    const url = storage.getPublicUrl("json", fn);
+    if (url?.startsWith("http")) return res.redirect(302, url);
+    res.status(404).end();
+  });
+  app.use("/files", express.static(outputDir));
+} else {
+  app.use("/files", express.static(outputDir));
+  app.use("/images/spare-part-images", express.static(categoryImagesDir));
+  app.use("/images/product-catalog-images", express.static(catalogImagesDir));
+  app.use("/json", express.static(jsonDir));
+}
 
-app.get("/api/status", (req, res) => {
-  const categoryCount = queryGet("SELECT COUNT(*) AS count FROM categories").count || 0;
-  const productCount = queryGet("SELECT COUNT(*) AS count FROM products").count || 0;
-  const mainCount = queryGet("SELECT COUNT(*) AS count FROM categories WHERE is_main = 1").count || 0;
+app.get("/api/status", async (req, res) => {
+  const categoryCount = (await queryGet("SELECT COUNT(*) AS count FROM categories")).count || 0;
+  const productCount = (await queryGet("SELECT COUNT(*) AS count FROM products")).count || 0;
+  const mainCount = (await queryGet("SELECT COUNT(*) AS count FROM categories WHERE is_main = 1")).count || 0;
   res.json({ categoryCount, productCount, mainCount });
 });
 
-app.get("/api/schema-versions", (req, res) => {
-  const versions = queryAll(
+app.get("/api/schema-versions", async (req, res) => {
+  const versions = await queryAll(
     "SELECT version, applied_at FROM schema_versions ORDER BY applied_at ASC"
   );
   res.json({ versions });
 });
 
-app.get("/api/search", (req, res) => {
+app.get("/api/search", async (req, res) => {
   const query = normalizeText(req.query?.query);
   const lang = normalizeText(req.query?.lang) || "sv";
   const limit = clampLimit(req.query?.limit, 50, 200);
@@ -1098,7 +1102,7 @@ app.get("/api/search", (req, res) => {
     return;
   }
   const term = `%${query}%`;
-  const rows = queryAll(
+  const rows = await queryAll(
     `SELECT p.sku, p.name_sv, p.name_en, p.desc_sv, p.desc_en,
             c.key AS category_key, c.path AS category_path
      FROM products p
@@ -1121,8 +1125,8 @@ app.get("/api/search", (req, res) => {
 });
 
 // Admin - Users
-app.get("/api/admin/users", (req, res) => {
-  const rows = queryAll(
+app.get("/api/admin/users", async (req, res) => {
+  const rows = await queryAll(
     `SELECT u.id, u.email, u.first_name, u.last_name, u.phone, u.status,
             u.is_order_manager, u.is_ce_admin, u.company_id,
             c.name AS company_name
@@ -1133,7 +1137,7 @@ app.get("/api/admin/users", (req, res) => {
   res.json(rows);
 });
 
-app.post("/api/admin/users", (req, res) => {
+app.post("/api/admin/users", async (req, res) => {
   const email = normalizeText(req.body?.email).toLowerCase();
   const password = normalizeText(req.body?.password);
   if (!email || !password) {
@@ -1148,7 +1152,7 @@ app.post("/api/admin/users", (req, res) => {
   const isOrderManager = normalizeBoolean(req.body?.is_order_manager);
   const isCeAdmin = normalizeBoolean(req.body?.is_ce_admin);
 
-  queryRun(
+  await queryRun(
     `INSERT INTO users (
        email, password_hash, first_name, last_name, phone, status, company_id,
        is_order_manager, is_ce_admin, created_at, updated_at
@@ -1168,7 +1172,7 @@ app.post("/api/admin/users", (req, res) => {
   res.json({ ok: true });
 });
 
-app.put("/api/admin/users/:id", (req, res) => {
+app.put("/api/admin/users/:id", async (req, res) => {
   const id = Number(req.params?.id);
   if (!id) {
     res.status(400).send("Invalid user id.");
@@ -1184,7 +1188,7 @@ app.put("/api/admin/users/:id", (req, res) => {
   const email = normalizeText(req.body?.email).toLowerCase();
   const password = normalizeText(req.body?.password);
 
-  queryRun(
+  await queryRun(
     `UPDATE users SET
       email = ?,
       first_name = ?,
@@ -1210,7 +1214,7 @@ app.put("/api/admin/users/:id", (req, res) => {
   );
 
   if (password) {
-    queryRun(
+    await queryRun(
       `UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?`,
       [hashPassword(password), id]
     );
@@ -1219,27 +1223,27 @@ app.put("/api/admin/users/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete("/api/admin/users/:id", (req, res) => {
+app.delete("/api/admin/users/:id", async (req, res) => {
   const id = Number(req.params?.id);
   if (!id) {
     res.status(400).send("Invalid user id.");
     return;
   }
-  queryRun("DELETE FROM sessions WHERE user_id = ?", [id]);
-  queryRun("DELETE FROM users WHERE id = ?", [id]);
+  await queryRun("DELETE FROM sessions WHERE user_id = ?", [id]);
+  await queryRun("DELETE FROM users WHERE id = ?", [id]);
   res.json({ ok: true });
 });
 
 // Admin - Companies
-app.get("/api/admin/companies", (req, res) => {
-  const rows = queryAll(
+app.get("/api/admin/companies", async (req, res) => {
+  const rows = await queryAll(
     `SELECT id, name, customer_number, discount_percent, country_code, no_pyramid_import
      FROM companies ORDER BY name ASC`
   );
   res.json(rows);
 });
 
-app.post("/api/admin/companies", (req, res) => {
+app.post("/api/admin/companies", async (req, res) => {
   const name = normalizeText(req.body?.name);
   if (!name) {
     res.status(400).send("Company name is required.");
@@ -1250,7 +1254,7 @@ app.post("/api/admin/companies", (req, res) => {
   const country = normalizeText(req.body?.country_code);
   const noPyramid = normalizeBoolean(req.body?.no_pyramid_import);
 
-  queryRun(
+  await queryRun(
     `INSERT INTO companies (name, customer_number, discount_percent, country_code, no_pyramid_import, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
     [name, customerNumber, discount, country, noPyramid]
@@ -1258,7 +1262,7 @@ app.post("/api/admin/companies", (req, res) => {
   res.json({ ok: true });
 });
 
-app.put("/api/admin/companies/:id", (req, res) => {
+app.put("/api/admin/companies/:id", async (req, res) => {
   const id = Number(req.params?.id);
   if (!id) {
     res.status(400).send("Invalid company id.");
@@ -1270,7 +1274,7 @@ app.put("/api/admin/companies/:id", (req, res) => {
   const country = normalizeText(req.body?.country_code);
   const noPyramid = normalizeBoolean(req.body?.no_pyramid_import);
 
-  queryRun(
+  await queryRun(
     `UPDATE companies SET
       name = ?,
       customer_number = ?,
@@ -1284,39 +1288,39 @@ app.put("/api/admin/companies/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete("/api/admin/companies/:id", (req, res) => {
+app.delete("/api/admin/companies/:id", async (req, res) => {
   const id = Number(req.params?.id);
   if (!id) {
     res.status(400).send("Invalid company id.");
     return;
   }
-  queryRun("DELETE FROM companies WHERE id = ?", [id]);
+  await queryRun("DELETE FROM companies WHERE id = ?", [id]);
   res.json({ ok: true });
 });
 
 // Admin - Delivery addresses
-app.get("/api/admin/delivery-addresses", (req, res) => {
+app.get("/api/admin/delivery-addresses", async (req, res) => {
   const companyId = req.query?.company_id ? Number(req.query.company_id) : null;
   const rows = companyId
-    ? queryAll(
+    ? await queryAll(
       `SELECT id, company_id, attn_first_name, attn_last_name, street, street_2, zip_code, postal_area, country, delivery_id
          FROM delivery_addresses WHERE company_id = ? ORDER BY id DESC`,
       [companyId]
     )
-    : queryAll(
+    : await queryAll(
       `SELECT id, company_id, attn_first_name, attn_last_name, street, street_2, zip_code, postal_area, country, delivery_id
          FROM delivery_addresses ORDER BY id DESC`
     );
   res.json(rows);
 });
 
-app.post("/api/admin/delivery-addresses", (req, res) => {
+app.post("/api/admin/delivery-addresses", async (req, res) => {
   const companyId = Number(req.body?.company_id);
   if (!companyId) {
     res.status(400).send("Company id is required.");
     return;
   }
-  queryRun(
+  await queryRun(
     `INSERT INTO delivery_addresses (
       company_id, attn_first_name, attn_last_name, street, street_2,
       zip_code, postal_area, country, delivery_id, created_at, updated_at
@@ -1336,13 +1340,13 @@ app.post("/api/admin/delivery-addresses", (req, res) => {
   res.json({ ok: true });
 });
 
-app.put("/api/admin/delivery-addresses/:id", (req, res) => {
+app.put("/api/admin/delivery-addresses/:id", async (req, res) => {
   const id = Number(req.params?.id);
   if (!id) {
     res.status(400).send("Invalid address id.");
     return;
   }
-  queryRun(
+  await queryRun(
     `UPDATE delivery_addresses SET
       company_id = ?,
       attn_first_name = ?,
@@ -1371,24 +1375,24 @@ app.put("/api/admin/delivery-addresses/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete("/api/admin/delivery-addresses/:id", (req, res) => {
+app.delete("/api/admin/delivery-addresses/:id", async (req, res) => {
   const id = Number(req.params?.id);
   if (!id) {
     res.status(400).send("Invalid address id.");
     return;
   }
-  queryRun("DELETE FROM delivery_addresses WHERE id = ?", [id]);
+  await queryRun("DELETE FROM delivery_addresses WHERE id = ?", [id]);
   res.json({ ok: true });
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   const email = normalizeText(req.body?.email).toLowerCase();
   const password = normalizeText(req.body?.password);
   if (!email || !password) {
     res.status(400).send("Email and password are required.");
     return;
   }
-  const user = queryGet("SELECT * FROM users WHERE email = ?", [email]);
+  const user = await queryGet("SELECT * FROM users WHERE email = ?", [email]);
   if (!user || !verifyPassword(password, user.password_hash)) {
     res.status(401).send("Invalid credentials.");
     return;
@@ -1400,16 +1404,17 @@ app.post("/api/auth/login", (req, res) => {
   const token = randomBytes(32).toString("hex");
   const tokenHash = hashSessionToken(token);
   const ttlSeconds = SESSION_TTL_DAYS * 24 * 60 * 60;
-  queryRun(
+  const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+  await queryRun(
     `INSERT INTO sessions (user_id, session_hash, expires_at, created_at, last_seen_at, ip, user_agent)
-     VALUES (?, ?, datetime('now', ?), datetime('now'), datetime('now'), ?, ?)`,
-    [user.id, tokenHash, `+${ttlSeconds} seconds`, req.ip || "", req.headers["user-agent"] || ""]
+     VALUES (?, ?, ?, datetime('now'), datetime('now'), ?, ?)`,
+    [user.id, tokenHash, expiresAt, req.ip || "", req.headers["user-agent"] || ""]
   );
   setSessionCookie(req, res, token, ttlSeconds);
-  res.json(buildUserResponse(user));
+  res.json(await buildUserResponse(user));
 });
 
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", async (req, res) => {
   const payload = req.body || {};
   const customer = payload.customer || {};
   const shipping = payload.shipping || {};
@@ -1426,21 +1431,22 @@ app.post("/api/auth/register", (req, res) => {
     return;
   }
 
-  const existing = queryGet("SELECT id FROM users WHERE email = ?", [email]);
+  const existing = await queryGet("SELECT id FROM users WHERE email = ?", [email]);
   if (existing) {
     res.status(409).send("Email already exists.");
     return;
   }
 
-  const companyRes = queryRun(
+  await queryRun(
     `INSERT INTO companies (name, customer_number, discount_percent, country_code, no_pyramid_import, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
     [companyName, "", 0, normalizeText(billing.country) || normalizeText(shipping.country), 0]
   );
-  const companyId = companyRes.lastInsertRowid;
+  const companyRow = await queryGet("SELECT id FROM companies WHERE name = ? ORDER BY id DESC LIMIT 1", [companyName]);
+  const companyId = companyRow?.id;
 
   const tempPassword = randomBytes(12).toString("hex");
-  queryRun(
+  await queryRun(
     `INSERT INTO users (
        email, password_hash, first_name, last_name, phone, company_id, status,
        is_order_manager, is_ce_admin,
@@ -1478,28 +1484,28 @@ app.post("/api/auth/register", (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/auth/logout", (req, res) => {
+app.post("/api/auth/logout", async (req, res) => {
   const cookies = parseCookies(req);
   const token = cookies[SESSION_COOKIE];
   if (token) {
     const tokenHash = hashSessionToken(token);
-    queryRun("DELETE FROM sessions WHERE session_hash = ?", [tokenHash]);
+    await queryRun("DELETE FROM sessions WHERE session_hash = ?", [tokenHash]);
   }
   clearSessionCookie(res);
   res.json({ ok: true });
 });
 
-app.get("/api/auth/me", (req, res) => {
-  const user = getAuthenticatedUser(req);
+app.get("/api/auth/me", async (req, res) => {
+  const user = await getAuthenticatedUser(req);
   if (!user) {
     res.status(401).send("Not authenticated.");
     return;
   }
-  res.json(buildUserResponse(user));
+  res.json(await buildUserResponse(user));
 });
 
-app.put("/api/user", (req, res) => {
-  const user = getAuthenticatedUser(req);
+app.put("/api/user", async (req, res) => {
+  const user = await getAuthenticatedUser(req);
   if (!user) {
     res.status(401).send("Not authenticated.");
     return;
@@ -1526,7 +1532,7 @@ app.put("/api/user", (req, res) => {
     shipping_postal_area: normalizeText(payload.shipping?.postal_area),
     shipping_country: normalizeText(payload.shipping?.country)
   };
-  queryRun(
+  await queryRun(
     `UPDATE users SET
       first_name = ?,
       last_name = ?,
@@ -1572,12 +1578,12 @@ app.put("/api/user", (req, res) => {
       user.id
     ]
   );
-  const updatedUser = queryGet("SELECT * FROM users WHERE id = ?", [user.id]);
-  res.json(buildUserResponse(updatedUser));
+  const updatedUser = await queryGet("SELECT * FROM users WHERE id = ?", [user.id]);
+  res.json(await buildUserResponse(updatedUser));
 });
 
-app.get("/api/delivery-addresses", (req, res) => {
-  const user = getAuthenticatedUser(req);
+app.get("/api/delivery-addresses", async (req, res) => {
+  const user = await getAuthenticatedUser(req);
   if (!user) {
     res.status(401).send("Not authenticated.");
     return;
@@ -1586,7 +1592,7 @@ app.get("/api/delivery-addresses", (req, res) => {
     res.json([]);
     return;
   }
-  const addresses = queryAll(
+  const addresses = await queryAll(
     `SELECT id, attn_first_name, attn_last_name, street, street_2, zip_code, postal_area, country, delivery_id
      FROM delivery_addresses WHERE company_id = ? ORDER BY id ASC`,
     [user.company_id]
@@ -1594,18 +1600,18 @@ app.get("/api/delivery-addresses", (req, res) => {
   res.json(addresses);
 });
 
-app.get("/api/main-products", (req, res) => {
-  const items = getMainProducts().map((row) => ({
+app.get("/api/main-products", async (req, res) => {
+  const items = (await getMainProducts()).map((row) => ({
     key: row.key,
     name: row.name_sv || row.name_en || row.key
   }));
   res.json(items);
 });
 
-app.get("/api/main-products/catalogs", (req, res) => {
-  const items = queryAll(
+app.get("/api/main-products/catalogs", async (req, res) => {
+  const items = (await queryAll(
     "SELECT key, name_sv, name_en, catalog_image FROM categories WHERE is_main = 1 ORDER BY position ASC, id ASC"
-  ).map((row) => ({
+  )).map((row) => ({
     key: row.key,
     name: row.name_sv || row.name_en || row.key,
     catalog_image: row.catalog_image || "",
@@ -1616,7 +1622,7 @@ app.get("/api/main-products/catalogs", (req, res) => {
   res.json(items);
 });
 
-app.post("/api/main-products/:key/catalog-image", upload.single("file"), (req, res) => {
+app.post("/api/main-products/:key/catalog-image", upload.single("file"), async (req, res) => {
   const key = normalizeText(req.params?.key);
   const file = req.file;
   if (!key) {
@@ -1627,7 +1633,7 @@ app.post("/api/main-products/:key/catalog-image", upload.single("file"), (req, r
     res.status(400).send("Image file is required.");
     return;
   }
-  const category = queryGet("SELECT key, is_main, catalog_image FROM categories WHERE key = ?", [key]);
+  const category = await queryGet("SELECT key, is_main, catalog_image FROM categories WHERE key = ?", [key]);
   if (!category) {
     res.status(404).send("Category not found.");
     return;
@@ -1637,9 +1643,9 @@ app.post("/api/main-products/:key/catalog-image", upload.single("file"), (req, r
     return;
   }
   if (category.catalog_image) {
-    removeCatalogImage(category.catalog_image);
+    await removeCatalogImage(category.catalog_image);
   }
-  const fileName = saveCatalogImage(file.buffer, file.originalname, key);
+  const fileName = await saveCatalogImage(file.buffer, file.originalname, key);
   res.json({
     key,
     catalog_image: fileName,
@@ -1647,13 +1653,13 @@ app.post("/api/main-products/:key/catalog-image", upload.single("file"), (req, r
   });
 });
 
-app.delete("/api/main-products/:key/catalog-image", (req, res) => {
+app.delete("/api/main-products/:key/catalog-image", async (req, res) => {
   const key = normalizeText(req.params?.key);
   if (!key) {
     res.status(400).send("Main key is required.");
     return;
   }
-  const category = queryGet("SELECT key, is_main, catalog_image FROM categories WHERE key = ?", [key]);
+  const category = await queryGet("SELECT key, is_main, catalog_image FROM categories WHERE key = ?", [key]);
   if (!category) {
     res.status(404).send("Category not found.");
     return;
@@ -1663,25 +1669,25 @@ app.delete("/api/main-products/:key/catalog-image", (req, res) => {
     return;
   }
   if (category.catalog_image) {
-    removeCatalogImage(category.catalog_image);
+    await removeCatalogImage(category.catalog_image);
   }
-  queryRun("UPDATE categories SET catalog_image = NULL, updated_at = datetime('now') WHERE key = ?", [key]);
+  await queryRun("UPDATE categories SET catalog_image = NULL, updated_at = datetime('now') WHERE key = ?", [key]);
   res.json({ key, catalog_image: "", catalog_url: "" });
 });
 
-app.get("/api/categories", (req, res) => {
+app.get("/api/categories", async (req, res) => {
   const query = normalizeText(req.query?.query);
   const limit = req.query?.limit;
-  res.json(listCategories({ query, limit }));
+  res.json(await listCategories({ query, limit }));
 });
 
-app.get("/api/machine-categories", (req, res) => {
+app.get("/api/machine-categories", async (req, res) => {
   const query = normalizeText(req.query?.query);
   const limit = req.query?.limit;
-  res.json(listMachineCategories({ query, limit }));
+  res.json(await listMachineCategories({ query, limit }));
 });
 
-app.post("/api/machine-categories", (req, res) => {
+app.post("/api/machine-categories", async (req, res) => {
   const nameSv = normalizeText(req.body?.name_sv);
   const nameEn = normalizeText(req.body?.name_en);
   const rawKey = normalizeText(req.body?.key || nameSv || nameEn);
@@ -1690,14 +1696,14 @@ app.post("/api/machine-categories", (req, res) => {
     res.status(400).send("Key is required.");
     return;
   }
-  const existing = queryGet("SELECT id FROM machine_categories WHERE key = ?", [key]);
+  const existing = await queryGet("SELECT id FROM machine_categories WHERE key = ?", [key]);
   if (existing) {
     res.status(400).send("Key already exists.");
     return;
   }
   const parentId = Number(req.body?.parent_id || 0);
   const position = Number(req.body?.position || 0);
-  queryRun(
+  await queryRun(
     `INSERT INTO machine_categories (key, name_sv, name_en, position, parent_id, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
     [key, nameSv, nameEn, Number.isNaN(position) ? 0 : position, Number.isNaN(parentId) ? 0 : parentId]
@@ -1705,38 +1711,38 @@ app.post("/api/machine-categories", (req, res) => {
   res.json({ key });
 });
 
-app.post("/api/machine-categories/update", (req, res) => {
+app.post("/api/machine-categories/update", async (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
   if (!items.length) {
     res.status(400).send("No machine categories provided.");
     return;
   }
-  const stmt = db.prepare(
-    `UPDATE machine_categories
-     SET name_sv = ?, name_en = ?, position = ?, parent_id = ?, updated_at = datetime('now')
-     WHERE id = ?`
-  );
   let updated = 0;
-  items.forEach((item) => {
+  for (const item of items) {
     const id = Number(item?.id);
     if (Number.isNaN(id) || id <= 0) {
-      return;
+      continue;
     }
     const position = Number(item?.position || 0);
     const parentId = Number(item?.parent_id || 0);
-    stmt.run(
-      normalizeText(item?.name_sv),
-      normalizeText(item?.name_en),
-      Number.isNaN(position) ? 0 : position,
-      Number.isNaN(parentId) ? 0 : parentId,
-      id
+    await queryRun(
+      `UPDATE machine_categories
+       SET name_sv = ?, name_en = ?, position = ?, parent_id = ?, updated_at = datetime('now')
+       WHERE id = ?`,
+      [
+        normalizeText(item?.name_sv),
+        normalizeText(item?.name_en),
+        Number.isNaN(position) ? 0 : position,
+        Number.isNaN(parentId) ? 0 : parentId,
+        id
+      ]
     );
     updated += 1;
-  });
+  }
   res.json({ updated });
 });
 
-app.delete("/api/machine-categories/:id", (req, res) => {
+app.delete("/api/machine-categories/:id", async (req, res) => {
   const id = Number(req.params?.id || 0);
   if (Number.isNaN(id) || id <= 0) {
     res.status(400).send("Invalid machine category id.");
@@ -1744,8 +1750,8 @@ app.delete("/api/machine-categories/:id", (req, res) => {
   }
   const cascadeParam = req.query?.cascade;
   const cascade = cascadeParam === undefined ? true : normalizeBoolean(cascadeParam);
-  const child = queryGet("SELECT id FROM machine_categories WHERE parent_id = ? LIMIT 1", [id]);
-  const linked = queryGet(
+  const child = await queryGet("SELECT id FROM machine_categories WHERE parent_id = ? LIMIT 1", [id]);
+  const linked = await queryGet(
     "SELECT machine_category_id FROM machine_category_product_categories WHERE machine_category_id = ? LIMIT 1",
     [id]
   );
@@ -1755,21 +1761,21 @@ app.delete("/api/machine-categories/:id", (req, res) => {
   }
 
   if (cascade) {
-    const childRows = queryAll("SELECT id FROM machine_categories WHERE parent_id = ?", [id]);
+    const childRows = await queryAll("SELECT id FROM machine_categories WHERE parent_id = ?", [id]);
     const allIds = [id, ...childRows.map((row) => row.id)];
     const placeholders = allIds.map(() => "?").join(", ");
-    queryRun(`DELETE FROM machine_category_product_categories WHERE machine_category_id IN (${placeholders})`, allIds);
-    queryRun(`DELETE FROM machine_categories WHERE id IN (${placeholders})`, allIds);
+    await queryRun(`DELETE FROM machine_category_product_categories WHERE machine_category_id IN (${placeholders})`, allIds);
+    await queryRun(`DELETE FROM machine_categories WHERE id IN (${placeholders})`, allIds);
     res.json({ deleted: allIds.length });
     return;
   }
 
-  queryRun("DELETE FROM machine_category_product_categories WHERE machine_category_id = ?", [id]);
-  queryRun("DELETE FROM machine_categories WHERE id = ?", [id]);
+  await queryRun("DELETE FROM machine_category_product_categories WHERE machine_category_id = ?", [id]);
+  await queryRun("DELETE FROM machine_categories WHERE id = ?", [id]);
   res.json({ deleted: 1 });
 });
 
-app.get("/api/image-maps", (req, res) => {
+app.get("/api/image-maps", async (req, res) => {
   const mainKey = normalizeText(req.query?.mainKey);
   if (!mainKey) {
     res.json([]);
@@ -1777,7 +1783,7 @@ app.get("/api/image-maps", (req, res) => {
   }
   const likeKey = `${mainKey}-%`;
   const likePath = `${mainKey}%`;
-  const categories = queryAll(
+  const categories = await queryAll(
     `SELECT key, path, name_sv, name_en, position, parent_key, id
      FROM categories
      WHERE key = ?
@@ -1793,17 +1799,18 @@ app.get("/api/image-maps", (req, res) => {
   }
   const keys = categories.map((row) => row.key);
   const placeholders = keys.map(() => "?").join(", ");
-  const mapRows = queryAll(
+  const mapRows = await queryAll(
     `SELECT category_key, html, updated_at
      FROM image_maps
      WHERE category_key IN (${placeholders})`,
     keys
   );
   const mapByKey = new Map(mapRows.map((row) => [row.category_key, row]));
-  const items = categories.map((row) => {
-    const mapRow = mapByKey.get(row.key);
-    const imageFile = findImageForKey(row.key, row.path);
-    return {
+  const items = await Promise.all(
+    categories.map(async (row) => {
+      const mapRow = mapByKey.get(row.key);
+      const imageFile = await findImageForKey(row.key, row.path || "");
+      return {
       key: row.key,
       name: row.name_sv || row.name_en || row.key,
       position: row.position ? String(row.position) : "0",
@@ -1811,18 +1818,19 @@ app.get("/api/image-maps", (req, res) => {
       has_map: imageMapHasHotspots(mapRow?.html),
       updated_at: mapRow?.updated_at || "",
       image_url: imageFile ? buildPublicUrl(`/images/spare-part-images/${imageFile}`) : ""
-    };
-  });
+      };
+    })
+  );
   res.json(items);
 });
 
-app.get("/api/image-maps/:key", (req, res) => {
+app.get("/api/image-maps/:key", async (req, res) => {
   const key = normalizeText(req.params?.key);
   if (!key) {
     res.status(400).send("Category key is required.");
     return;
   }
-  const category = queryGet(
+  const category = await queryGet(
     "SELECT key, path, name_sv, name_en, position, parent_key FROM categories WHERE key = ?",
     [key]
   );
@@ -1830,8 +1838,8 @@ app.get("/api/image-maps/:key", (req, res) => {
     res.status(404).send("Category not found.");
     return;
   }
-  const mapRow = getImageMapRow(key);
-  const imageFile = findImageForKey(key, category.path);
+  const mapRow = await getImageMapRow(key);
+  const imageFile = await findImageForKey(key, category.path || "");
   res.json({
     key: category.key,
     name: category.name_sv || category.name_en || category.key,
@@ -1841,45 +1849,45 @@ app.get("/api/image-maps/:key", (req, res) => {
     map: mapRow
       ? { html: mapRow.html || "", updated_at: mapRow.updated_at || "" }
       : { html: "", updated_at: "" },
-    child_categories: getChildCategoriesWithLabels(key),
-    products: getProductsForCategoryKey(key)
+    child_categories: await getChildCategoriesWithLabels(key),
+    products: await getProductsForCategoryKey(key)
   });
 });
 
-app.post("/api/image-maps", (req, res) => {
+app.post("/api/image-maps", async (req, res) => {
   const key = normalizeText(req.body?.key);
   if (!key) {
     res.status(400).send("Category key is required.");
     return;
   }
-  const category = queryGet("SELECT key FROM categories WHERE key = ?", [key]);
+  const category = await queryGet("SELECT key FROM categories WHERE key = ?", [key]);
   if (!category) {
     res.status(404).send("Category not found.");
     return;
   }
   const html = normalizeText(req.body?.html);
   const updatedAt = normalizeText(req.body?.updated_at) || null;
-  upsertImageMap(key, html, updatedAt);
+  await upsertImageMap(key, html, updatedAt);
   res.json({ ok: true });
 });
 
-app.delete("/api/image-maps/:key", (req, res) => {
+app.delete("/api/image-maps/:key", async (req, res) => {
   const key = normalizeText(req.params?.key);
   if (!key) {
     res.status(400).send("Category key is required.");
     return;
   }
-  queryRun("DELETE FROM image_maps WHERE category_key = ?", [key]);
+  await queryRun("DELETE FROM image_maps WHERE category_key = ?", [key]);
   res.json({ deleted: 1 });
 });
 
-app.get("/wp-json/wccd/v1/get-image-map/:slug", (req, res) => {
+app.get("/wp-json/wccd/v1/get-image-map/:slug", async (req, res) => {
   const slug = normalizeText(req.params?.slug);
   if (!slug) {
     res.status(404).send("No image map found.");
     return;
   }
-  const row = getImageMapRow(slug);
+  const row = await getImageMapRow(slug);
   if (!row) {
     res.status(404).send("No image map found.");
     return;
@@ -1892,7 +1900,7 @@ app.get("/wp-json/wccd/v1/get-image-map/:slug", (req, res) => {
   });
 });
 
-app.post("/wp-json/wccd/v1/update-image-map", (req, res) => {
+app.post("/wp-json/wccd/v1/update-image-map", async (req, res) => {
   const slug = normalizeText(req.body?.slug);
   const html = normalizeText(req.body?.html);
   const authcode = normalizeText(req.body?.authcode);
@@ -1905,11 +1913,11 @@ app.post("/wp-json/wccd/v1/update-image-map", (req, res) => {
     return;
   }
   const updatedAt = normalizeText(req.body?.updated_at) || null;
-  upsertImageMap(slug, html, updatedAt);
+  await upsertImageMap(slug, html, updatedAt);
   res.json({ ok: true });
 });
 
-app.post("/api/machine-categories/:id/product-categories", (req, res) => {
+app.post("/api/machine-categories/:id/product-categories", async (req, res) => {
   const id = Number(req.params?.id || 0);
   const categoryKey = normalizeText(req.body?.categoryKey);
   const position = Number(req.body?.position || 0);
@@ -1921,12 +1929,12 @@ app.post("/api/machine-categories/:id/product-categories", (req, res) => {
     res.status(400).send("Category key is required.");
     return;
   }
-  const category = queryGet("SELECT key FROM categories WHERE key = ?", [categoryKey]);
+  const category = await queryGet("SELECT key FROM categories WHERE key = ?", [categoryKey]);
   if (!category) {
     res.status(400).send("Category not found.");
     return;
   }
-  queryRun(
+  await queryRun(
     `INSERT INTO machine_category_product_categories (machine_category_id, category_key, position)
      VALUES (?, ?, ?)
      ON CONFLICT(machine_category_id, category_key) DO UPDATE SET position = excluded.position`,
@@ -1935,7 +1943,7 @@ app.post("/api/machine-categories/:id/product-categories", (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete("/api/machine-categories/:id/product-categories/:categoryKey", (req, res) => {
+app.delete("/api/machine-categories/:id/product-categories/:categoryKey", async (req, res) => {
   const id = Number(req.params?.id || 0);
   const categoryKey = normalizeText(req.params?.categoryKey);
   if (Number.isNaN(id) || id <= 0) {
@@ -1946,14 +1954,14 @@ app.delete("/api/machine-categories/:id/product-categories/:categoryKey", (req, 
     res.status(400).send("Category key is required.");
     return;
   }
-  queryRun(
+  await queryRun(
     "DELETE FROM machine_category_product_categories WHERE machine_category_id = ? AND category_key = ?",
     [id, categoryKey]
   );
   res.json({ ok: true });
 });
 
-app.post("/api/categories", (req, res) => {
+app.post("/api/categories", async (req, res) => {
   const pathValue = normalizeText(req.body?.path);
   if (!pathValue) {
     res.status(400).send("Category path is required.");
@@ -1964,7 +1972,7 @@ app.post("/api/categories", (req, res) => {
     res.status(400).send("Category key is required.");
     return;
   }
-  const existing = queryGet("SELECT key FROM categories WHERE key = ?", [key]);
+  const existing = await queryGet("SELECT key FROM categories WHERE key = ?", [key]);
   if (existing) {
     res.status(400).send("Category key already exists.");
     return;
@@ -1972,7 +1980,7 @@ app.post("/api/categories", (req, res) => {
   const parentKey = resolveParentKey(pathValue);
   const position = Number(req.body?.position || 0);
   const isMain = normalizeBoolean(req.body?.is_main);
-  queryRun(
+  await queryRun(
     `INSERT INTO categories (key, path, name_sv, desc_sv, name_en, desc_en, position, parent_key, is_main, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
     [
@@ -1990,39 +1998,37 @@ app.post("/api/categories", (req, res) => {
   res.json({ key });
 });
 
-app.post("/api/categories/update", (req, res) => {
+app.post("/api/categories/update", async (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
   if (!items.length) {
     res.status(400).send("No category items provided.");
     return;
   }
-  const stmt = db.prepare(
-    `UPDATE categories
-     SET name_sv = ?, desc_sv = ?, name_en = ?, desc_en = ?, position = ?, is_main = ?, updated_at = datetime('now')
-     WHERE key = ?`
-  );
   let updated = 0;
-  items.forEach((item) => {
+  for (const item of items) {
     const key = normalizeText(item?.key);
-    if (!key) {
-      return;
-    }
+    if (!key) continue;
     const position = Number(item?.position || 0);
-    stmt.run(
-      normalizeText(item?.name_sv),
-      normalizeText(item?.desc_sv),
-      normalizeText(item?.name_en),
-      normalizeText(item?.desc_en),
-      Number.isNaN(position) ? 0 : position,
-      normalizeBoolean(item?.is_main),
-      key
+    await queryRun(
+      `UPDATE categories
+       SET name_sv = ?, desc_sv = ?, name_en = ?, desc_en = ?, position = ?, is_main = ?, updated_at = datetime('now')
+       WHERE key = ?`,
+      [
+        normalizeText(item?.name_sv),
+        normalizeText(item?.desc_sv),
+        normalizeText(item?.name_en),
+        normalizeText(item?.desc_en),
+        Number.isNaN(position) ? 0 : position,
+        normalizeBoolean(item?.is_main),
+        key
+      ]
     );
     updated += 1;
-  });
+  }
   res.json({ updated });
 });
 
-app.delete("/api/categories/:key", (req, res) => {
+app.delete("/api/categories/:key", async (req, res) => {
   const key = normalizeText(req.params?.key);
   if (!key) {
     res.status(400).send("Category key is required.");
@@ -2030,48 +2036,48 @@ app.delete("/api/categories/:key", (req, res) => {
   }
   const cascade = normalizeBoolean(req.query?.cascade);
   if (!cascade) {
-    const child = queryGet("SELECT key FROM categories WHERE parent_key = ? LIMIT 1", [key]);
-    const linked = queryGet("SELECT category_key FROM product_categories WHERE category_key = ? LIMIT 1", [key]);
+    const child = await queryGet("SELECT key FROM categories WHERE parent_key = ? LIMIT 1", [key]);
+    const linked = await queryGet("SELECT category_key FROM product_categories WHERE category_key = ? LIMIT 1", [key]);
     if (child || linked) {
       res.status(400).send("Category has children or products. Use cascade delete.");
       return;
     }
-    queryRun("DELETE FROM categories WHERE key = ?", [key]);
+    await queryRun("DELETE FROM categories WHERE key = ?", [key]);
     res.json({ deleted: 1 });
     return;
   }
   const likePattern = `${key}-%`;
-  const targets = queryAll("SELECT key FROM categories WHERE key = ? OR key LIKE ?", [key, likePattern]);
+  const targets = await queryAll("SELECT key FROM categories WHERE key = ? OR key LIKE ?", [key, likePattern]);
   const keys = targets.map((row) => row.key);
   if (!keys.length) {
     res.json({ deleted: 0 });
     return;
   }
   const placeholders = keys.map(() => "?").join(", ");
-  queryRun(`DELETE FROM product_categories WHERE category_key IN (${placeholders})`, keys);
-  queryRun(`DELETE FROM categories WHERE key IN (${placeholders})`, keys);
+  await queryRun(`DELETE FROM product_categories WHERE category_key IN (${placeholders})`, keys);
+  await queryRun(`DELETE FROM categories WHERE key IN (${placeholders})`, keys);
   res.json({ deleted: keys.length });
 });
 
-app.get("/api/products", (req, res) => {
+app.get("/api/products", async (req, res) => {
   const query = normalizeText(req.query?.query);
   const limit = req.query?.limit;
-  res.json(listProducts({ query, limit }));
+  res.json(await listProducts({ query, limit }));
 });
 
-app.post("/api/products", (req, res) => {
+app.post("/api/products", async (req, res) => {
   const sku = normalizeText(req.body?.sku);
   if (!sku) {
     res.status(400).send("SKU is required.");
     return;
   }
-  const existing = queryGet("SELECT sku FROM products WHERE sku = ?", [sku]);
+  const existing = await queryGet("SELECT sku FROM products WHERE sku = ?", [sku]);
   if (existing) {
     res.status(400).send("SKU already exists.");
     return;
   }
   const position = Number(req.body?.pos_num || 0);
-  queryRun(
+  await queryRun(
     `INSERT INTO products (sku, name_sv, desc_sv, name_en, desc_en, price, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
     [
@@ -2086,95 +2092,92 @@ app.post("/api/products", (req, res) => {
   res.json({ sku });
 });
 
-app.post("/api/products/update", (req, res) => {
+app.post("/api/products/update", async (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
   if (!items.length) {
     res.status(400).send("No product items provided.");
     return;
   }
-  const stmt = db.prepare(
-    `UPDATE products
-     SET name_sv = ?, desc_sv = ?, name_en = ?, desc_en = ?, price = ?, updated_at = datetime('now')
-     WHERE sku = ?`
-  );
   let updated = 0;
-  items.forEach((item) => {
+  for (const item of items) {
     const sku = normalizeText(item?.sku);
-    if (!sku) {
-      return;
-    }
-    const position = Number(item?.pos_num || 0);
-    stmt.run(
-      normalizeText(item?.name_sv),
-      normalizeText(item?.desc_sv),
-      normalizeText(item?.name_en),
-      normalizeText(item?.desc_en),
-      normalizeText(item?.price),
-      sku
+    if (!sku) continue;
+    await queryRun(
+      `UPDATE products
+       SET name_sv = ?, desc_sv = ?, name_en = ?, desc_en = ?, price = ?, updated_at = datetime('now')
+       WHERE sku = ?`,
+      [
+        normalizeText(item?.name_sv),
+        normalizeText(item?.desc_sv),
+        normalizeText(item?.name_en),
+        normalizeText(item?.desc_en),
+        normalizeText(item?.price),
+        sku
+      ]
     );
     updated += 1;
-  });
+  }
   res.json({ updated });
 });
 
-app.delete("/api/products/:sku", (req, res) => {
+app.delete("/api/products/:sku", async (req, res) => {
   const sku = normalizeText(req.params?.sku);
   if (!sku) {
     res.status(400).send("SKU is required.");
     return;
   }
-  queryRun("DELETE FROM product_categories WHERE product_sku = ?", [sku]);
-  queryRun("DELETE FROM products WHERE sku = ?", [sku]);
+  await queryRun("DELETE FROM product_categories WHERE product_sku = ?", [sku]);
+  await queryRun("DELETE FROM products WHERE sku = ?", [sku]);
   res.json({ deleted: 1 });
 });
 
-app.post("/api/products/:sku/categories", (req, res) => {
+app.post("/api/products/:sku/categories", async (req, res) => {
   const sku = normalizeText(req.params?.sku);
   const categoryKey = normalizeText(req.body?.categoryKey);
   if (!sku || !categoryKey) {
     res.status(400).send("SKU and category key are required.");
     return;
   }
-  const category = queryGet("SELECT key FROM categories WHERE key = ?", [categoryKey]);
+  const category = await queryGet("SELECT key FROM categories WHERE key = ?", [categoryKey]);
   if (!category) {
     res.status(400).send("Category not found.");
     return;
   }
-  insertProductCategory.run(sku, categoryKey, 0, 1);
+  await insertProductCategory(sku, categoryKey, 0, 1);
   res.json({ ok: true });
 });
 
-app.delete("/api/products/:sku/categories/:categoryKey", (req, res) => {
+app.delete("/api/products/:sku/categories/:categoryKey", async (req, res) => {
   const sku = normalizeText(req.params?.sku);
   const categoryKey = normalizeText(req.params?.categoryKey);
   if (!sku || !categoryKey) {
     res.status(400).send("SKU and category key are required.");
     return;
   }
-  queryRun("DELETE FROM product_categories WHERE product_sku = ? AND category_key = ?", [sku, categoryKey]);
+  await queryRun("DELETE FROM product_categories WHERE product_sku = ? AND category_key = ?", [sku, categoryKey]);
   res.json({ ok: true });
 });
 
-app.get("/api/settings/price-currency", (req, res) => {
-  res.json(getPriceCurrencySettings());
+app.get("/api/settings/price-currency", async (req, res) => {
+  res.json(await getPriceCurrencySettings());
 });
 
-app.post("/api/settings/price-currency", (req, res) => {
+app.post("/api/settings/price-currency", async (req, res) => {
   const normalized = buildPriceCurrencySettings(req.body || {});
   if (normalized.error) {
     res.status(400).send(normalized.error);
     return;
   }
-  setSetting("price_currency", normalized);
+  await setSetting("price_currency", normalized);
   res.json(normalized);
 });
 
-app.get("/api/language/categories", (req, res) => {
+app.get("/api/language/categories", async (req, res) => {
   const query = normalizeText(req.query?.query);
   const limit = Number(req.query?.limit || 200);
   const safeLimit = Number.isNaN(limit) ? 200 : Math.min(Math.max(limit, 1), 500);
   const term = `%${query}%`;
-  const items = queryAll(
+  const items = await queryAll(
     `SELECT id, key, path, name_sv, desc_sv, name_en, desc_en, name_pl, desc_pl
      FROM categories
      WHERE ? = '' OR key LIKE ? OR path LIKE ? OR name_sv LIKE ? OR name_en LIKE ? OR desc_sv LIKE ? OR desc_en LIKE ?
@@ -2185,12 +2188,12 @@ app.get("/api/language/categories", (req, res) => {
   res.json(items);
 });
 
-app.get("/api/language/products", (req, res) => {
+app.get("/api/language/products", async (req, res) => {
   const query = normalizeText(req.query?.query);
   const limit = Number(req.query?.limit || 200);
   const safeLimit = Number.isNaN(limit) ? 200 : Math.min(Math.max(limit, 1), 500);
   const term = `%${query}%`;
-  const items = queryAll(
+  const items = await queryAll(
     `SELECT sku, name_sv, desc_sv, name_en, desc_en, name_pl, desc_pl
      FROM products
      WHERE ? = '' OR sku LIKE ? OR name_sv LIKE ? OR name_en LIKE ? OR desc_sv LIKE ? OR desc_en LIKE ?
@@ -2201,7 +2204,7 @@ app.get("/api/language/products", (req, res) => {
   res.json(items);
 });
 
-app.post("/api/language/update", (req, res) => {
+app.post("/api/language/update", async (req, res) => {
   const type = normalizeText(req.body?.type).toLowerCase();
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
   if (!items.length) {
@@ -2211,44 +2214,40 @@ app.post("/api/language/update", (req, res) => {
 
   let updated = 0;
   if (type === "category") {
-    const stmt = db.prepare(
-      "UPDATE categories SET name_sv = ?, desc_sv = ?, name_en = ?, desc_en = ?, name_pl = ?, desc_pl = ?, updated_at = datetime('now') WHERE id = ?"
-    );
-    items.forEach((item) => {
-      if (!item?.id) {
-        return;
-      }
-      stmt.run(
-        normalizeText(item.name_sv),
-        normalizeText(item.desc_sv),
-        normalizeText(item.name_en),
-        normalizeText(item.desc_en),
-        normalizeText(item.name_pl),
-        normalizeText(item.desc_pl),
-        item.id
+    for (const item of items) {
+      if (!item?.id) continue;
+      await queryRun(
+        "UPDATE categories SET name_sv = ?, desc_sv = ?, name_en = ?, desc_en = ?, name_pl = ?, desc_pl = ?, updated_at = datetime('now') WHERE id = ?",
+        [
+          normalizeText(item.name_sv),
+          normalizeText(item.desc_sv),
+          normalizeText(item.name_en),
+          normalizeText(item.desc_en),
+          normalizeText(item.name_pl),
+          normalizeText(item.desc_pl),
+          item.id
+        ]
       );
       updated += 1;
-    });
+    }
   } else if (type === "product") {
-    const stmt = db.prepare(
-      "UPDATE products SET name_sv = ?, desc_sv = ?, name_en = ?, desc_en = ?, name_pl = ?, desc_pl = ?, updated_at = datetime('now') WHERE sku = ?"
-    );
-    items.forEach((item) => {
+    for (const item of items) {
       const sku = normalizeText(item.sku);
-      if (!sku) {
-        return;
-      }
-      stmt.run(
-        normalizeText(item.name_sv),
-        normalizeText(item.desc_sv),
-        normalizeText(item.name_en),
-        normalizeText(item.desc_en),
-        normalizeText(item.name_pl),
-        normalizeText(item.desc_pl),
-        sku
+      if (!sku) continue;
+      await queryRun(
+        "UPDATE products SET name_sv = ?, desc_sv = ?, name_en = ?, desc_en = ?, name_pl = ?, desc_pl = ?, updated_at = datetime('now') WHERE sku = ?",
+        [
+          normalizeText(item.name_sv),
+          normalizeText(item.desc_sv),
+          normalizeText(item.name_en),
+          normalizeText(item.desc_en),
+          normalizeText(item.name_pl),
+          normalizeText(item.desc_pl),
+          sku
+        ]
       );
       updated += 1;
-    });
+    }
   } else {
     res.status(400).send("Unknown language type.");
     return;
@@ -2264,7 +2263,7 @@ app.post(
     { name: "zip", maxCount: 1 },
     { name: "catalog", maxCount: 1 }
   ]),
-  (req, res) => {
+  async (req, res) => {
     const csvFile = req.files?.csv?.[0];
     if (!csvFile) {
       res.status(400).send("CSV file is required.");
@@ -2323,7 +2322,7 @@ app.post(
 
     if (skusToReplace.length) {
       const skuPlaceholders = skusToReplace.map(() => "?").join(", ");
-      queryRun(`DELETE FROM product_categories WHERE product_sku IN (${skuPlaceholders})`, skusToReplace);
+      await queryRun(`DELETE FROM product_categories WHERE product_sku IN (${skuPlaceholders})`, skusToReplace);
     }
 
     const importedMainKeys = new Set();
@@ -2333,22 +2332,22 @@ app.post(
     let productUpdated = 0;
     let productLinksReset = skusToReplace.length;
 
-    records.forEach((row) => {
+    for (const row of records) {
       const type = normalizeText(row.type).toLowerCase();
       const pathValue = normalizeText(row.category_path);
       const key = createKeyFromPath(pathValue);
       if (!key) {
-        return;
+        continue;
       }
 
       if (type === "produkt") {
-        const existing = queryGet("SELECT key FROM categories WHERE key = ?", [key]);
+        const existing = await queryGet("SELECT key FROM categories WHERE key = ?", [key]);
         const nameSv = normalizeText(row.name_sv);
         const descSv = normalizeText(row.desc_sv);
         const nameEn = normalizeText(row.name_en);
         const descEn = normalizeText(row.desc_en);
         const position = Number(row.number || 0);
-        upsertCategory.run(
+        await upsertCategory(
           key,
           pathValue,
           nameSv,
@@ -2368,18 +2367,18 @@ app.post(
           categoryCreated += 1;
         }
         importedMainKeys.add(key);
-        return;
+        continue;
       }
 
       if (type === "kategori") {
-        const existing = queryGet("SELECT key FROM categories WHERE key = ?", [key]);
+        const existing = await queryGet("SELECT key FROM categories WHERE key = ?", [key]);
         const nameSv = normalizeText(row.name_sv);
         const descSv = normalizeText(row.desc_sv);
         const nameEn = normalizeText(row.name_en);
         const descEn = normalizeText(row.desc_en);
         const position = Number(row.number || 0);
         const parentKey = resolveParentKey(pathValue);
-        upsertCategory.run(
+        await upsertCategory(
           key,
           pathValue,
           nameSv,
@@ -2398,22 +2397,22 @@ app.post(
         } else {
           categoryCreated += 1;
         }
-        return;
+        continue;
       }
 
       if (type === "artikel") {
         const sku = normalizeText(row.artikel_id);
         if (!sku) {
-          return;
+          continue;
         }
-        const existing = queryGet("SELECT sku FROM products WHERE sku = ?", [sku]);
+        const existing = await queryGet("SELECT sku FROM products WHERE sku = ?", [sku]);
         const nameSv = normalizeText(row.name_sv);
         const descSv = normalizeText(row.desc_sv);
         const nameEn = normalizeText(row.name_en);
         const descEn = normalizeText(row.desc_en);
         const position = Number(row.number || 0);
         const noUnits = normalizeText(row.no_units);
-        upsertProduct.run(
+        await upsertProduct(
           sku,
           nameSv,
           descSv,
@@ -2423,28 +2422,28 @@ app.post(
           null, // desc_pl
           null  // price (preserved by COALESCE if null)
         );
-        insertProductCategory.run(sku, key, position, noUnits || 1);
+        await insertProductCategory(sku, key, position, noUnits || 1);
         if (existing) {
           productUpdated += 1;
         } else {
           productCreated += 1;
         }
       }
-    });
+    }
 
     let imageCount = 0;
     if (zipFile) {
-      imageCount = importZip(zipFile.buffer);
+      imageCount = await importZip(zipFile.buffer);
     }
 
     const catalogFile = req.files?.catalog?.[0];
     if (catalogFile && importedMainKeys.size > 0) {
       const firstKey = Array.from(importedMainKeys)[0];
-      saveCatalogImage(catalogFile.buffer, catalogFile.originalname, firstKey);
+      await saveCatalogImage(catalogFile.buffer, catalogFile.originalname, firstKey);
     }
 
-    const categoryCount = queryGet("SELECT COUNT(*) AS count FROM categories").count || 0;
-    const productCount = queryGet("SELECT COUNT(*) AS count FROM products").count || 0;
+    const categoryCount = (await queryGet("SELECT COUNT(*) AS count FROM categories")).count || 0;
+    const productCount = (await queryGet("SELECT COUNT(*) AS count FROM products")).count || 0;
 
     res.json({
       ok: true,
@@ -2468,7 +2467,7 @@ app.post(
   }
 );
 
-app.post("/api/import/pricelist", upload.single("csv"), (req, res) => {
+app.post("/api/import/pricelist", upload.single("csv"), async (req, res) => {
   const csvFile = req.file;
   if (!csvFile) {
     res.status(400).send("CSV file is required.");
@@ -2486,59 +2485,59 @@ app.post("/api/import/pricelist", upload.single("csv"), (req, res) => {
   let updated = 0;
   let missing = 0;
 
-  records.forEach((row) => {
+  for (const row of records) {
     const sku = normalizeText(row.artikelkod);
     if (!sku) {
-      return;
+      continue;
     }
     let price = normalizeText(row.grundpris);
     if (price) {
       price = price.replace(",", ".");
     }
-    const existing = queryGet("SELECT sku FROM products WHERE sku = ?", [sku]);
+    const existing = await queryGet("SELECT sku FROM products WHERE sku = ?", [sku]);
     if (!existing) {
       missing += 1;
-      return;
+      continue;
     }
-    queryRun("UPDATE products SET price = ?, updated_at = datetime('now') WHERE sku = ?", [price, sku]);
+    await queryRun("UPDATE products SET price = ?, updated_at = datetime('now') WHERE sku = ?", [price, sku]);
     updated += 1;
-  });
+  }
 
   res.json({ updated, missing });
 });
 
-app.post("/api/generate-json", (req, res) => {
+app.post("/api/generate-json", async (req, res) => {
   const { mainKey, skipGlobal, onlyGlobal } = req.body || {};
 
   const files = [];
   const manifestEntries = [];
 
   if (!onlyGlobal) {
-    const mainItems = mainKey ? [{ key: normalizeText(mainKey) }] : getMainProducts();
+    const mainItems = mainKey ? [{ key: normalizeText(mainKey) }] : await getMainProducts();
     if (!mainItems.length) {
       res.status(400).send("No main products found.");
       return;
     }
 
-    mainItems.forEach((item) => {
-      const generated = generateJsonForMainKey(item.key);
+    for (const item of mainItems) {
+      const generated = await generateJsonForMainKey(item.key);
       files.push(...generated);
       generated.forEach((filePath) => {
         manifestEntries.push({ file: basename(filePath), scope: item.key });
       });
-    });
+    }
   }
 
   if (!skipGlobal || onlyGlobal) {
-    const machinePath = generateMachineCategoriesJson();
-    const pricePath = generatePriceSettingsJson();
+    const machinePath = await generateMachineCategoriesJson();
+    const pricePath = await generatePriceSettingsJson();
     files.push(machinePath);
     files.push(pricePath);
     manifestEntries.push({ file: basename(machinePath), scope: "global" });
     manifestEntries.push({ file: basename(pricePath), scope: "global" });
   }
 
-  const contractPath = writeContractManifest(manifestEntries);
+  const contractPath = await writeContractManifest(jsonDir, manifestEntries);
   res.json({
     outputDir: jsonDir,
     files,

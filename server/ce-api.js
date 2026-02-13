@@ -1,5 +1,4 @@
 import express from "express";
-import { DatabaseSync } from "node:sqlite";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,7 +32,18 @@ export function registerCeRoutes(app) {
   mkdirSync(ceAssetsDir, { recursive: true });
 
   let ceDb = null;
+  let sqliteStmt = null;
   if (!usePostgres) {
+    const sqliteModulePromise = import("node:sqlite");
+    sqliteStmt = sqliteModulePromise;
+  }
+
+  async function ensureCeDb() {
+    if (usePostgres || ceDb) {
+      return;
+    }
+    const sqliteModule = await sqliteStmt;
+    const DatabaseSync = sqliteModule.DatabaseSync;
     ceDb = new DatabaseSync(dbPath);
     ceDb.exec("PRAGMA foreign_keys = ON;");
     if (existsSync(schemaPath)) {
@@ -108,6 +118,7 @@ export function registerCeRoutes(app) {
       const { queryAll } = await import("./db.js");
       return queryAll(sql, params);
     }
+    await ensureCeDb();
     return ceDb.prepare(sql).all(...params);
   }
 
@@ -116,6 +127,7 @@ export function registerCeRoutes(app) {
       const { queryGet } = await import("./db.js");
       return queryGet(sql, params);
     }
+    await ensureCeDb();
     return ceDb.prepare(sql).get(...params) ?? null;
   }
 
@@ -124,6 +136,7 @@ export function registerCeRoutes(app) {
       const { queryRun } = await import("./db.js");
       return queryRun(sql, params);
     }
+    await ensureCeDb();
     return ceDb.prepare(sql).run(...params);
   }
 

@@ -1,8 +1,16 @@
 const RAW_API_BASE = (import.meta.env.VITE_API_BASE || "").trim();
+
+function resolveFallbackApiBase() {
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin.replace(/\/+$/, "")}/api`;
+  }
+  return "http://localhost:8788/api";
+}
+
 const API_BASE =
   RAW_API_BASE && RAW_API_BASE.startsWith("http")
     ? RAW_API_BASE
-    : "http://localhost:8788/api";
+    : resolveFallbackApiBase();
 
 async function requestJson(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, { credentials: "include", ...options });

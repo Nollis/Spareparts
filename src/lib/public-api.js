@@ -1,4 +1,7 @@
-const fallbackApiBase = "http://localhost:8788/api";
+const fallbackApiBase =
+  typeof window !== "undefined" && window.location?.origin
+    ? `${window.location.origin.replace(/\/+$/, "")}/api`
+    : "http://localhost:8788/api";
 const API_BASE =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_PUBLIC_API_BASE) ||
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE) ||

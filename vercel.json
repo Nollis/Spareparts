@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "http://209.38.245.1/api/:path*" },
+    { "source": "/json/:path*", "destination": "http://209.38.245.1/json/:path*" },
+    { "source": "/wp-json/:path*", "destination": "http://209.38.245.1/wp-json/:path*" },
+    { "source": "/ce/:path*", "destination": "http://209.38.245.1/ce/:path*" }
+  ]
+}

@@ -1064,12 +1064,13 @@ if (storage.useSpacesStorage()) {
     if (url?.startsWith("http")) return res.redirect(302, url);
     res.status(404).end();
   });
-  app.get("/json/:filename", (req, res) => {
+  app.get("/json/:filename", async (req, res) => {
     const fn = req.params.filename;
     if (!fn || fn.includes("..")) return res.status(400).end();
-    const url = storage.getPublicUrl("json", fn);
-    if (url?.startsWith("http")) return res.redirect(302, url);
-    res.status(404).end();
+    const data = await storage.get("json", fn);
+    if (!data) return res.status(404).end();
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.send(data);
   });
   app.use("/files", express.static(outputDir));
 } else {

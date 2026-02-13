@@ -13,3 +13,5 @@ images/
 *.sqlite
 .DS_Store
 .env
+!public/design/assets/machine.jpg
+!public/design/assets/swepac-logo.png

@@ -43,7 +43,11 @@ function toPgSql(sql) {
 export async function initDb() {
   if (usePostgres) {
     const { default: pg } = await import("pg");
-    const url = process.env.DATABASE_URL;
+    const rawUrl = process.env.DATABASE_URL || "";
+    const url = rawUrl.trim().replace(/^['"]|['"]$/g, "");
+    if (!url) {
+      throw new Error("DATABASE_URL is empty after normalization.");
+    }
     const strictVerify = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === "true";
     const needsSsl = url?.includes("sslmode=require");
     const cleanUrl = url?.replace(/([?&])sslmode=[^&]*/g, "$1").replace(/\?&/, "?").replace(/[?&]$/, "") || url;

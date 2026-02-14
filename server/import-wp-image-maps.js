@@ -1,8 +1,6 @@
 import "dotenv/config";
-import { DatabaseSync } from "node:sqlite";
-import { resolve } from "node:path";
+import { initDb, queryAll, queryRun } from "./db.js";
 
-const dbPath = process.env.MANAGER_DB_PATH || resolve("data", "manager.sqlite");
 const baseUrl =
   (process.env.WP_IMAGE_MAP_BASE || "").trim() ||
   "http://swepac.local/wp-json/wccd/v1/get-image-map/";
@@ -45,21 +43,11 @@ async function runBatch(items, handler, limit) {
   return results;
 }
 
-function main() {
-  const db = new DatabaseSync(dbPath);
-  const rows = db
-    .prepare("SELECT key FROM categories WHERE key IS NOT NULL AND key != ''")
-    .all();
-  const slugs = rows.map((row) => row.key);
+async function main() {
+  await initDb();
+  const rows = await queryAll("SELECT key FROM categories WHERE key IS NOT NULL AND key != ''");
+  const slugs = rows.map((row) => row.key).filter(Boolean);
   const base = normalizeBase(baseUrl);
-
-  const upsert = db.prepare(
-    `INSERT INTO image_maps (category_key, html, updated_at)
-     VALUES (?, ?, COALESCE(?, datetime('now')))
-     ON CONFLICT(category_key) DO UPDATE SET
-       html = excluded.html,
-       updated_at = COALESCE(excluded.updated_at, datetime('now'))`
-  );
 
   let imported = 0;
   let skipped = 0;
@@ -74,7 +62,14 @@ function main() {
           skipped += 1;
           return;
         }
-        upsert.run(slug, mapData.html, mapData.updated_at || null);
+        await queryRun(
+          `INSERT INTO image_maps (category_key, html, updated_at)
+           VALUES (?, ?, COALESCE(?, datetime('now')))
+           ON CONFLICT(category_key) DO UPDATE SET
+             html = excluded.html,
+             updated_at = COALESCE(excluded.updated_at, datetime('now'))`,
+          [slug, mapData.html, mapData.updated_at || null]
+        );
         imported += 1;
       } catch {
         failed += 1;
@@ -82,7 +77,6 @@ function main() {
     },
     concurrency
   ).then(() => {
-    db.close();
     console.log(`Image maps imported: ${imported}`);
     console.log(`Image maps skipped (missing/empty): ${skipped}`);
     console.log(`Image maps failed: ${failed}`);

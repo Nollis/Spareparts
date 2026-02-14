@@ -1836,14 +1836,20 @@ app.get("/api/image-maps/:key", async (req, res) => {
     res.status(400).send("Category key is required.");
     return;
   }
-  const category = await queryGet(
+  const categoryRow = await queryGet(
     "SELECT key, path, name_sv, name_en, position, parent_key FROM categories WHERE key = ?",
     [key]
   );
-  if (!category) {
-    res.status(404).send("Category not found.");
-    return;
-  }
+  // Some catalogs reference image-map keys that are not in the categories table.
+  // Return an empty payload instead of 404 so the UI can continue rendering.
+  const category = categoryRow || {
+    key,
+    path: "",
+    name_sv: key,
+    name_en: key,
+    position: "0",
+    parent_key: ""
+  };
   const mapRow = await getImageMapRow(key);
   const imageFile = await findImageForKey(key, category.path || "");
   res.json({

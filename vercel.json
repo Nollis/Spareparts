@@ -4,6 +4,8 @@
     { "source": "/json/:path*", "destination": "http://209.38.245.1/json/:path*" },
     { "source": "/wp-json/:path*", "destination": "http://209.38.245.1/wp-json/:path*" },
     { "source": "/ce/:path*", "destination": "http://209.38.245.1/ce/:path*" },
-    { "source": "/images/:path*", "destination": "http://209.38.245.1/images/:path*" }
+    { "source": "/images/:path*", "destination": "http://209.38.245.1/images/:path*" },
+    { "source": "/admin", "destination": "/" },
+    { "source": "/admin/:path*", "destination": "/" }
   ]
 }

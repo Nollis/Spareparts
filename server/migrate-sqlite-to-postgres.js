@@ -49,11 +49,11 @@ const sqlitePath =
   process.env.MANAGER_DB_PATH ||
   resolve("data", "manager.sqlite");
 
-const connectionString = (process.env.DATABASE_URL || "").trim();
+const rawConnectionString = (process.env.DATABASE_URL || "").trim();
 const truncateFirst = !hasArg("--no-truncate");
 const chunkSize = Number(getArgValue("--chunk-size", "200")) || 200;
 
-if (!connectionString) {
+if (!rawConnectionString) {
   console.error("DATABASE_URL is required.");
   process.exit(1);
 }
@@ -83,11 +83,14 @@ const preferredOrder = [
 
 async function main() {
   const sqlite = new DatabaseSync(sqlitePath);
+  const needsSsl = rawConnectionString.includes("sslmode=require");
+  const connectionString = rawConnectionString
+    .replace(/([?&])sslmode=[^&]*/g, "$1")
+    .replace(/\?&/, "?")
+    .replace(/[?&]$/, "");
   const client = new Client({
     connectionString,
-    ssl: connectionString.includes("sslmode=require")
-      ? { rejectUnauthorized: false }
-      : false
+    ssl: needsSsl ? { rejectUnauthorized: false } : false
   });
 
   await client.connect();

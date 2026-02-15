@@ -11,6 +11,7 @@
     "api": "node server/index.js",
     "migrate": "node server/run-migrations.js",
     "seed:admin": "node server/seed-admin.js",
+    "migrate:sqlite-to-postgres": "node server/migrate-sqlite-to-postgres.js",
     "ce:import-dumps": "node server/ce-import-sql-dumps.js",
     "ce:cleanup-serials": "node server/ce-normalize-serials.js",
     "images:import-catalog": "node server/import-catalog-images.js",
